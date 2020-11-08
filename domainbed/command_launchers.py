@@ -19,9 +19,28 @@ def dummy_launcher(commands):
     for cmd in commands:
         print(f'Dummy launcher: {cmd}')
 
+def hpc_launcher(commands):
+    with open('jobs.txt', 'w') as f:
+        f.writelines(commands)
+    
+    num_tasks = len(commands)
+    print("num_tasks", num_tasks)
+    with open('submit.sh', 'w') as f:
+        f.write("#!/bin/bash\n")
+        f.write("#SBATCH --cpus-per-task=8\n")
+        f.write("#SBATCH --mem-per-cpu=50MB\n")
+        f.write("#SBATCH --partition=p40_4,p100_4,v100_sxm2_4,v100_pci_2\n")
+        f.write(f"#SBATCH --array=1-{num_tasks}\n")
+        f.write("#SBATCH --gres=gpu:1\n")
+        f.write("#SBATCH --time=1:00:00\n")
+
+        f.write("srun $(head -n $SLURM_ARRAY_TASK_ID jobs.txt | tail -n 1)")
+    subprocess.call("sbatch -vv submit.sh", shell=True)
+
 REGISTRY = {
     'local': local_launcher,
-    'dummy': dummy_launcher
+    'dummy': dummy_launcher,
+    'hpc': hpc_launcher
 }
 
 try:
