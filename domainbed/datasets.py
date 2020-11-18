@@ -2,6 +2,8 @@
 
 import os
 import torch
+from easydict import EasyDict as edict
+import json
 from PIL import Image, ImageFile
 from torchvision import transforms
 import torchvision.datasets.folder
@@ -25,6 +27,7 @@ DATASETS = [
     "TerraIncognita",
     "DomainNet",
     "SVIRO",
+    'chestXR'
 ]
 
 def get_dataset_class(dataset_name):
@@ -251,3 +254,167 @@ class SVIRO(MultipleEnvironmentImageFolder):
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "sviro/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
+
+class chestXR(MultipleEnvironmentImageFolder):
+    CHECKPOINT_FREQ = 1000
+    ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
+    def __init__(self, root, test_envs, hparams):
+        self.dir = ['/beegfs/wz727/mimic-cxr',
+                    '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
+                    '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
+                    '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
+        super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
+
+class CheXpertDataset(Dataset):
+    def __init__(self, label_path, cfg='/scratch/wz727/chest_XR/chest_XR/data/CheXpert/configs.json', mode='train'):
+        with open(cfg) as f:
+            self.cfg = edict(json.load(f))
+        self._label_header = None
+        self._image_paths = []
+        self._labels = []
+        self._mode = mode
+        self.dict = [{'1.0': '1', '': '0', '0.0': '0', '-1.0': '0'},
+                     {'1.0': '1', '': '0', '0.0': '0', '-1.0': '1'}, ]
+        self._data_path = label_path.rsplit('/',2)[0]
+        with open(label_path) as f:
+            header = f.readline().strip('\n').split(',')
+            self._label_header = [
+                header[7],
+                header[10],
+                header[11],
+                header[13],
+                header[15]]
+            for line in f:
+                labels = []
+                fields = line.strip('\n').split(',')
+                image_path = self._data_path+'/'+fields[0]
+#                 flg_enhance = False
+                for index, value in enumerate(fields[5:]):
+                    if index == 5 or index == 8:
+                        labels.append(self.dict[1].get(value))
+#                         if self.dict[1].get(
+#                                 value) == '1' and \
+#                                 self.cfg.enhance_index.count(index) > 0:
+#                             flg_enhance = True
+                    elif index == 2 or index == 6 or index == 10:
+                        labels.append(self.dict[0].get(value))
+#                         if self.dict[0].get(
+#                                 value) == '1' and \
+#                                 self.cfg.enhance_index.count(index) > 0:
+#                             flg_enhance = True
+                # labels = ([self.dict.get(n, n) for n in fields[5:]])
+                labels = list(map(int, labels))
+                self._image_paths.append(image_path)
+                assert os.path.exists(image_path), image_path
+                self._labels.append(labels)
+#                 if flg_enhance and self._mode == 'train':
+#                     for i in range(self.cfg.enhance_times):
+#                         self._image_paths.append(image_path)
+#                         self._labels.append(labels)
+        self._num_image = len(self._image_paths)
+
+    def __len__(self):
+        return self._num_image
+
+    def __getitem__(self, idx):
+        image = cv2.imread(self._image_paths[idx], 0)
+        image = Image.fromarray(image)
+#         if self._mode == 'train':
+#             image = GetTransforms(image, type=self.cfg.use_transforms_type)
+        image = np.array(image)
+        image = transform(image, self.cfg)
+        labels = np.array(self._labels[idx]).astype(np.float32)
+
+        path = self._image_paths[idx]
+        if self._mode == 'train' or self._mode == 'dev':
+            return (image, labels)
+        elif self._mode == 'test':
+            return (image, path)
+        else:
+            raise Exception('Unknown mode : {}'.format(self._mode))
+
+class MimicCXRDataset(Dataset):
+    def __init__(self, label_path, cfg='/beegfs/wz727/mimic-cxr/configs.json', mode='train'):
+        with open(cfg) as f:
+            self.cfg = edict(json.load(f))
+        self._label_header = None
+        self._image_paths = []
+        self._labels = []
+        self._mode = mode
+        self.dict = [{'1.0': '1', '': '0', '0.0': '0', '-1.0': '0'},
+                     {'1.0': '1', '': '0', '0.0': '0', '-1.0': '1'}, ]
+        self._data_path = label_path.rsplit('/',1)[0]
+        with open(label_path) as f:
+            header = f.readline().strip('\n').split(',')
+            self._label_header = [
+                header[3],
+                header[5],
+                header[4],
+                header[2],
+                header[13]]
+            for line in f:
+                labels = []
+                fields = line.strip('\n').split(',')
+                subject_id, study_id, dicom_id, split = fields[0], fields[1], fields[-3], fields[-1]
+                if split != mode:
+                    continue
+                image_path = self._data_path + '/p' + subject_id[:2] + '/p' +  subject_id + \
+                '/s' + study_id + '/' + dicom_id + '.jpg'
+                for index, value in enumerate(fields[2:]):
+                    if index == 3 or index == 0:
+                        labels.append(self.dict[1].get(value))
+                    elif index == 1 or index == 2 or index == 11:
+                        labels.append(self.dict[0].get(value))
+                labels = list(map(int, labels))
+                self._image_paths.append(image_path)
+                assert os.path.exists(image_path), image_path
+                self._labels.append(labels)
+        self._num_image = len(self._image_paths)
+
+    def __len__(self):
+        return self._num_image
+
+    def __getitem__(self, idx):
+        image = cv2.imread(self._image_paths[idx], 0)
+        image = Image.fromarray(image)
+        image = np.array(image)
+        image = transform(image, self.cfg)
+        labels = np.array(self._labels[idx]).astype(np.float32)
+
+        path = self._image_paths[idx]
+        if self._mode == 'train' or self._mode == 'dev':
+            return (image, labels)
+        elif self._mode == 'test':
+            return (image, path)
+        else:
+            raise Exception('Unknown mode : {}'.format(self._mode))
+
+
+class ChestXRImageFolder(MultipleDomainDataset):
+    def __init__(self, root, test_envs, augment, hparams):
+        super().__init__()
+        environments = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
+        paths = ['/beegfs/wz727/mimic-cxr',
+                '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
+                '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
+                '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
+
+        self.datasets = []
+        for i, environment in enumerate(environments):
+            path = os.path.join(root, environment)
+            if environments[i] == 'mimic-cxr':
+                env_dataset = MimicCXRDataset(paths[i] + '/targets.csv')
+            elif environment[i] == 'chexpert':
+                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train.csv')
+            elif environment[i] == 'chestxr8':
+                continue
+            elif environment[i] == 'padchest':
+                continue
+            else:
+                raise Exception('Unknown environments')
+
+
+            self.datasets.append(env_dataset)
+
+        self.input_shape = (3, 224, 224,)
+        self.num_classes = len(self.datasets[-1].classes)
