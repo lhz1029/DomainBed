@@ -10,6 +10,7 @@ import torchvision.datasets.folder
 from torch.utils.data import TensorDataset
 from torchvision.datasets import MNIST, ImageFolder
 from torchvision.transforms.functional import rotate
+from utils import transform, GetTransforms
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -278,39 +279,25 @@ class CheXpertDataset(Dataset):
         self._data_path = label_path.rsplit('/',2)[0]
         with open(label_path) as f:
             header = f.readline().strip('\n').split(',')
-            self._label_header = [
+            self._label_header = np.array([
                 header[7],
                 header[10],
                 header[11],
                 header[13],
-                header[15]]
+                header[15]])
             for line in f:
                 labels = []
                 fields = line.strip('\n').split(',')
                 image_path = self._data_path+'/'+fields[0]
-#                 flg_enhance = False
                 for index, value in enumerate(fields[5:]):
                     if index == 5 or index == 8:
                         labels.append(self.dict[1].get(value))
-#                         if self.dict[1].get(
-#                                 value) == '1' and \
-#                                 self.cfg.enhance_index.count(index) > 0:
-#                             flg_enhance = True
                     elif index == 2 or index == 6 or index == 10:
                         labels.append(self.dict[0].get(value))
-#                         if self.dict[0].get(
-#                                 value) == '1' and \
-#                                 self.cfg.enhance_index.count(index) > 0:
-#                             flg_enhance = True
-                # labels = ([self.dict.get(n, n) for n in fields[5:]])
-                labels = list(map(int, labels))
+                labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
-#                 if flg_enhance and self._mode == 'train':
-#                     for i in range(self.cfg.enhance_times):
-#                         self._image_paths.append(image_path)
-#                         self._labels.append(labels)
         self._num_image = len(self._image_paths)
 
     def __len__(self):
@@ -319,8 +306,8 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, idx):
         image = cv2.imread(self._image_paths[idx], 0)
         image = Image.fromarray(image)
-#         if self._mode == 'train':
-#             image = GetTransforms(image, type=self.cfg.use_transforms_type)
+        if self._mode == 'train':
+            image = GetTransforms(image, type=self.cfg.use_transforms_type)
         image = np.array(image)
         image = transform(image, self.cfg)
         labels = np.array(self._labels[idx]).astype(np.float32)
@@ -346,12 +333,12 @@ class MimicCXRDataset(Dataset):
         self._data_path = label_path.rsplit('/',1)[0]
         with open(label_path) as f:
             header = f.readline().strip('\n').split(',')
-            self._label_header = [
+            self._label_header = np.array([
                 header[3],
                 header[5],
                 header[4],
                 header[2],
-                header[13]]
+                header[13]])
             for line in f:
                 labels = []
                 fields = line.strip('\n').split(',')
@@ -365,7 +352,7 @@ class MimicCXRDataset(Dataset):
                         labels.append(self.dict[1].get(value))
                     elif index == 1 or index == 2 or index == 11:
                         labels.append(self.dict[0].get(value))
-                labels = list(map(int, labels))
+                labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
@@ -377,6 +364,8 @@ class MimicCXRDataset(Dataset):
     def __getitem__(self, idx):
         image = cv2.imread(self._image_paths[idx], 0)
         image = Image.fromarray(image)
+        if self._mode == 'train':
+            image = GetTransforms(image, type=self.cfg.use_transforms_type)
         image = np.array(image)
         image = transform(image, self.cfg)
         labels = np.array(self._labels[idx]).astype(np.float32)
