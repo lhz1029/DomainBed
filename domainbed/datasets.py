@@ -4,6 +4,9 @@ import os
 import torch
 from easydict import EasyDict as edict
 import json
+import pandas as pd
+import numpy as np
+import cv2
 from PIL import Image, ImageFile
 from torchvision import transforms
 import torchvision.datasets.folder
@@ -30,6 +33,8 @@ DATASETS = [
     "SVIRO",
     'chestXR'
 ]
+
+diseases = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pneumonia']
 
 def get_dataset_class(dataset_name):
     """Return the dataset class with the given name."""
@@ -266,7 +271,30 @@ class chestXR(MultipleEnvironmentImageFolder):
                     '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
-class CheXpertDataset(Dataset):
+
+class ChestDataset(Dataset):
+    def __len__(self):
+        return self._num_image
+
+    def __getitem__(self, idx):
+        image = cv2.imread(self._image_paths[idx], 0)
+        image = Image.fromarray(image)
+        if self._mode == 'train':
+            image = GetTransforms(image, type=self.cfg.use_transforms_type)
+        image = np.array(image)
+        image = transform(image, self.cfg)
+        labels = np.array(self._labels[idx]).astype(np.float32)
+
+        path = self._image_paths[idx]
+        if self._mode == 'train' or self._mode == 'dev':
+            return (image, labels)
+        elif self._mode == 'test':
+            return (image, path)
+        else:
+            raise Exception('Unknown mode : {}'.format(self._mode))
+
+
+class CheXpertDataset(ChestDataset):
     def __init__(self, label_path, cfg='/scratch/wz727/chest_XR/chest_XR/data/CheXpert/configs.json', mode='train'):
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
@@ -300,27 +328,8 @@ class CheXpertDataset(Dataset):
                 self._labels.append(labels)
         self._num_image = len(self._image_paths)
 
-    def __len__(self):
-        return self._num_image
 
-    def __getitem__(self, idx):
-        image = cv2.imread(self._image_paths[idx], 0)
-        image = Image.fromarray(image)
-        if self._mode == 'train':
-            image = GetTransforms(image, type=self.cfg.use_transforms_type)
-        image = np.array(image)
-        image = transform(image, self.cfg)
-        labels = np.array(self._labels[idx]).astype(np.float32)
-
-        path = self._image_paths[idx]
-        if self._mode == 'train' or self._mode == 'dev':
-            return (image, labels)
-        elif self._mode == 'test':
-            return (image, path)
-        else:
-            raise Exception('Unknown mode : {}'.format(self._mode))
-
-class MimicCXRDataset(Dataset):
+class MimicCXRDataset(ChestDataset):
     def __init__(self, label_path, cfg='/beegfs/wz727/mimic-cxr/configs.json', mode='train'):
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
@@ -358,25 +367,46 @@ class MimicCXRDataset(Dataset):
                 self._labels.append(labels)
         self._num_image = len(self._image_paths)
 
-    def __len__(self):
-        return self._num_image
 
-    def __getitem__(self, idx):
-        image = cv2.imread(self._image_paths[idx], 0)
-        image = Image.fromarray(image)
-        if self._mode == 'train':
-            image = GetTransforms(image, type=self.cfg.use_transforms_type)
-        image = np.array(image)
-        image = transform(image, self.cfg)
-        labels = np.array(self._labels[idx]).astype(np.float32)
+class ChestXR8Dataset(ChestDataset):
+    def __init__(self, label_path, cfg='/scratch/wz727/chest_XR/chest_XR/data/chestxray8/configs.json', mode='train'):
+        def get_labels(label_strs):
+            all_labels = []
+            for label in label_strs:
+                labels_split = label.split('|')
+                label_final = [d in labels_split for d in diseases]
+                all_labels.append(label_final)
+            return all_labels
+        self._data_path = label_path.rsplit('/',1)[0]
+        self._mode = mode
+        self.cfg = cfg
+        labels = pd.read_csv(label_path)
+        labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
+        self._image_paths = [os.path.join(self._data_path, 'images', name) for name in labels['Image Index'].values]
+        self._labels = get_labels(labels['Finding Labels'].values)
+        self._num_image = len(self._image_paths)
+        assert len(self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
-        path = self._image_paths[idx]
-        if self._mode == 'train' or self._mode == 'dev':
-            return (image, labels)
-        elif self._mode == 'test':
-            return (image, path)
-        else:
-            raise Exception('Unknown mode : {}'.format(self._mode))
+
+class PadChestDataset(ChestDataset):
+    def __init__(self, label_path, cfg='/scratch/lhz209/padchest/configs.json', mode='train'):
+        def get_labels(label_strs):
+            all_labels = []
+            for label in label_strs:
+                label_final = [d.lower() in label for d in diseases]
+                all_labels.append(label_final)
+            return all_labels
+        self._data_path = label_path.rsplit('/',1)[0]
+        self._mode = mode
+        self.cfg = cfg
+        labels = pd.read_csv(label_path)
+        positions = ['AP', 'PA', 'ANTEROPOSTERIOR', 'POSTEROANTERIOR']
+        labels = labels[pd.notnull(labels['ViewPosition_DICOM'])&labels['ViewPosition_DICOM'].str.match(positions)]
+        labels = labels[labels['Labels'].str.contains('|'.join([d.lower() for d in diseases] + ['normal']))]
+        self._image_paths = [os.path.join(self._data_path, name) for name in labels['ImageID'].values]
+        self._labels = get_labels(labels['Labels'].values)
+        self._num_image = len(self._image_paths)
+        assert len(self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class ChestXRImageFolder(MultipleDomainDataset):
@@ -396,9 +426,9 @@ class ChestXRImageFolder(MultipleDomainDataset):
             elif environment[i] == 'chexpert':
                 env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train.csv')
             elif environment[i] == 'chestxr8':
-                continue
+                env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv')
             elif environment[i] == 'padchest':
-                continue
+                env_dataset = PadChestDataset(paths[i] + '/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv')
             else:
                 raise Exception('Unknown environments')
 
