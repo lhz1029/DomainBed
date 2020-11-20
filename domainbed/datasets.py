@@ -36,6 +36,7 @@ DATASETS = [
 
 diseases = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pneumonia']
 
+
 def get_dataset_class(dataset_name):
     """Return the dataset class with the given name."""
     if dataset_name not in globals():
@@ -48,12 +49,12 @@ def num_environments(dataset_name):
 
 
 class MultipleDomainDataset:
-    N_STEPS = 5001           # Default, subclasses may override
-    CHECKPOINT_FREQ = 100    # Default, subclasses may override
-    N_WORKERS = 8            # Default, subclasses may override
-    ENVIRONMENTS = None      # Subclasses should override
-    INPUT_SHAPE = None       # Subclasses should override
-    
+    N_STEPS = 5001  # Default, subclasses may override
+    CHECKPOINT_FREQ = 100  # Default, subclasses may override
+    N_WORKERS = 8  # Default, subclasses may override
+    ENVIRONMENTS = None  # Subclasses should override
+    INPUT_SHAPE = None  # Subclasses should override
+
     def __getitem__(self, index):
         return self.datasets[index]
 
@@ -75,9 +76,11 @@ class Debug(MultipleDomainDataset):
                 )
             )
 
+
 class Debug28(Debug):
     INPUT_SHAPE = (3, 28, 28)
     ENVIRONMENTS = ['0', '1', '2']
+
 
 class Debug224(Debug):
     INPUT_SHAPE = (3, 224, 224)
@@ -121,7 +124,7 @@ class ColoredMNIST(MultipleEnvironmentMNIST):
 
     def __init__(self, root, test_envs, hparams):
         super(ColoredMNIST, self).__init__(root, [0.1, 0.2, 0.9],
-                                         self.color_dataset, (2, 28, 28,), 2)
+                                           self.color_dataset, (2, 28, 28,), 2)
 
         self.input_shape = (2, 28, 28,)
         self.num_classes = 2
@@ -142,7 +145,7 @@ class ColoredMNIST(MultipleEnvironmentMNIST):
         images = torch.stack([images, images], dim=1)
         # Apply the color to the image by zeroing out the other color channel
         images[torch.tensor(range(len(images))), (
-            1 - colors).long(), :, :] *= 0
+                                                         1 - colors).long(), :, :] *= 0
 
         x = images.float().div_(255.0)
         y = labels.view(-1).long()
@@ -178,6 +181,7 @@ class RotatedMNIST(MultipleEnvironmentMNIST):
 
         return TensorDataset(x, y)
 
+
 class MultipleEnvironmentImageFolder(MultipleDomainDataset):
     def __init__(self, root, test_envs, augment, hparams):
         super().__init__()
@@ -185,7 +189,7 @@ class MultipleEnvironmentImageFolder(MultipleDomainDataset):
         environments = sorted(environments)
 
         transform = transforms.Compose([
-            transforms.Resize((224,224)),
+            transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -212,54 +216,67 @@ class MultipleEnvironmentImageFolder(MultipleDomainDataset):
 
             path = os.path.join(root, environment)
             env_dataset = ImageFolder(path,
-                transform=env_transform)
+                                      transform=env_transform)
 
             self.datasets.append(env_dataset)
 
         self.input_shape = (3, 224, 224,)
         self.num_classes = len(self.datasets[-1].classes)
 
+
 class VLCS(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 300
     ENVIRONMENTS = ["C", "L", "S", "V"]
+
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "VLCS/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
+
 class PACS(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 300
     ENVIRONMENTS = ["A", "C", "P", "S"]
+
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "PACS/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
+
 class DomainNet(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 1000
     ENVIRONMENTS = ["clip", "info", "paint", "quick", "real", "sketch"]
+
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "domain_net/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
+
 class OfficeHome(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 300
     ENVIRONMENTS = ["A", "C", "P", "R"]
+
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "office_home/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
+
 class TerraIncognita(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 300
     ENVIRONMENTS = ["L100", "L38", "L43", "L46"]
+
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "terra_incognita/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
+
 class SVIRO(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 300
     ENVIRONMENT_NAMES = ["aclass", "escape", "hilux", "i3", "lexus", "tesla", "tiguan", "tucson", "x5", "zoe"]
+
     def __init__(self, root, test_envs, hparams):
         self.dir = os.path.join(root, "sviro/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
+
 
 # class chestXR(MultipleEnvironmentImageFolder):
 #     CHECKPOINT_FREQ = 1000
@@ -278,7 +295,10 @@ class ChestDataset(Dataset):
 
     def __getitem__(self, idx):
         image = cv2.imread(self._image_paths[idx], 0)
-        image = Image.fromarray(image)
+        try:
+            image = Image.fromarray(image)
+        except:
+            raise Exception('None image path: {}'.format(self._image_paths[idx]))
         if self._mode == 'train':
             image = GetTransforms(image, type=self.cfg.use_transforms_type)
         image = np.array(image)
@@ -304,7 +324,7 @@ class CheXpertDataset(ChestDataset):
         self._mode = mode
         self.dict = [{'1.0': True, '': False, '0.0': False, '-1.0': False},
                      {'1.0': True, '': False, '0.0': False, '-1.0': True}, ]
-        self._data_path = label_path.rsplit('/',2)[0]
+        self._data_path = label_path.rsplit('/', 2)[0]
         with open(label_path) as f:
             header = f.readline().strip('\n').split(',')
             self._label_header = np.array([
@@ -316,7 +336,7 @@ class CheXpertDataset(ChestDataset):
             for line in f:
                 labels = []
                 fields = line.strip('\n').split(',')
-                image_path = self._data_path+'/'+fields[0]
+                image_path = self._data_path + '/' + fields[0]
                 for index, value in enumerate(fields[5:]):
                     if index == 5 or index == 8:
                         labels.append(self.dict[1].get(value))
@@ -339,7 +359,7 @@ class MimicCXRDataset(ChestDataset):
         self._mode = mode
         self.dict = [{'1.0': True, '': False, '0.0': False, '-1.0': False},
                      {'1.0': True, '': False, '0.0': False, '-1.0': True}, ]
-        self._data_path = label_path.rsplit('/',1)[0]
+        self._data_path = label_path.rsplit('/', 1)[0]
         with open(label_path) as f:
             header = f.readline().strip('\n').split(',')
             self._label_header = np.array([
@@ -354,8 +374,8 @@ class MimicCXRDataset(ChestDataset):
                 subject_id, study_id, dicom_id, split = fields[0], fields[1], fields[-3], fields[-1]
                 if split != mode:
                     continue
-                image_path = self._data_path + '/p' + subject_id[:2] + '/p' +  subject_id + \
-                '/s' + study_id + '/' + dicom_id + '.jpg'
+                image_path = self._data_path + '/p' + subject_id[:2] + '/p' + subject_id + \
+                             '/s' + study_id + '/' + dicom_id + '.jpg'
                 for index, value in enumerate(fields[2:]):
                     if index == 3 or index == 0:
                         labels.append(self.dict[1].get(value))
@@ -377,15 +397,18 @@ class ChestXR8Dataset(ChestDataset):
                 label_final = [d in labels_split for d in diseases]
                 all_labels.append(label_final)
             return all_labels
-        self._data_path = label_path.rsplit('/',1)[0]
+
+        self._data_path = label_path.rsplit('/', 1)[0]
         self._mode = mode
-        self.cfg = cfg
+        with open(cfg) as f:
+            self.cfg = edict(json.load(f))
         labels = pd.read_csv(label_path)
         labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
         self._image_paths = [os.path.join(self._data_path, 'images', name) for name in labels['Image Index'].values]
         self._labels = get_labels(labels['Finding Labels'].values)
         self._num_image = len(self._image_paths)
-        assert len(self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
+        assert len(
+            self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class PadChestDataset(ChestDataset):
@@ -396,29 +419,37 @@ class PadChestDataset(ChestDataset):
                 label_final = [d.lower() in label for d in diseases]
                 all_labels.append(label_final)
             return all_labels
-        self._data_path = label_path.rsplit('/',1)[0]
+
+        self._data_path = label_path.rsplit('/', 1)[0]
         self._mode = mode
-        self.cfg = cfg
+        with open(cfg) as f:
+            self.cfg = edict(json.load(f))
         labels = pd.read_csv(label_path)
         positions = ['AP', 'PA', 'ANTEROPOSTERIOR', 'POSTEROANTERIOR']
-        labels = labels[pd.notnull(labels['ViewPosition_DICOM'])&labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
-        labels = labels[pd.notnull(labels['Labels'])&labels['Labels'].str.contains('|'.join([d.lower() for d in diseases] + ['normal']))]
+        labels = labels[
+            pd.notnull(labels['ViewPosition_DICOM']) & labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
+        labels = labels[pd.notnull(labels['Labels']) & labels['Labels'].str.contains(
+            '|'.join([d.lower() for d in diseases] + ['normal']))]
         self._image_paths = [os.path.join(self._data_path, name) for name in labels['ImageID'].values]
         self._labels = get_labels(labels['Labels'].values)
         self._num_image = len(self._image_paths)
-        assert len(self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
+        assert len(
+            self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class chestXR(MultipleDomainDataset):
+    ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
+    N_STEPS = 100000  # Default, subclasses may override
+    CHECKPOINT_FREQ = 5000  # Default, subclasses may override
+    N_WORKERS = 1
     def __init__(self, root, test_envs, hparams):
         super().__init__()
-        environments = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
         paths = ['/beegfs/wz727/mimic-cxr',
-                '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
-                '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
-                '/scratch/lhz209/padchest']
+                 '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
+                 '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
+                 '/scratch/lhz209/padchest']
         self.datasets = []
-        for i, environment in enumerate(environments):
+        for i, environment in enumerate(chestXR.ENVIRONMENTS):
             print(environment)
             path = os.path.join(root, environment)
             if environment == 'mimic-cxr':
@@ -431,7 +462,6 @@ class chestXR(MultipleDomainDataset):
                 env_dataset = PadChestDataset(paths[i] + '/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv')
             else:
                 raise Exception('Unknown environments')
-
 
             self.datasets.append(env_dataset)
 

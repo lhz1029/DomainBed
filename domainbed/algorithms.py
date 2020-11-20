@@ -76,7 +76,7 @@ class ERM(Algorithm):
     def update(self, minibatches):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
-        loss = nn.BCELosswithLogits()(self.predict(all_x), all_y)
+        loss = nn.BCEWithLogitsLoss()(self.predict(all_x), all_y)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -167,10 +167,10 @@ class AbstractDANN(Algorithm):
         if self.class_balance:
             y_counts = F.one_hot(all_y).sum(dim=0)
             weights = 1. / (y_counts[all_y] * y_counts.shape[0]).float()
-            disc_loss = nn.BCELosswithLogits()(disc_out, disc_labels, reduction='none')
+            disc_loss = nn.BCEWithLogitsLoss()(disc_out, disc_labels, reduction='none')
             disc_loss = (weights * disc_loss).sum()
         else:
-            disc_loss = nn.BCELosswithLogits()(disc_out, disc_labels)
+            disc_loss = nn.BCEWithLogitsLoss()(disc_out, disc_labels)
 
         disc_softmax = F.softmax(disc_out, dim=1)
         input_grad = autograd.grad(disc_softmax[:, disc_labels].sum(),
@@ -187,7 +187,7 @@ class AbstractDANN(Algorithm):
             return {'disc_loss': disc_loss.item()}
         else:
             all_preds = self.classifier(all_z)
-            classifier_loss = nn.BCELosswithLogits()(all_preds, all_y)
+            classifier_loss = nn.BCEWithLogitsLoss()(all_preds, all_y)
             gen_loss = (classifier_loss +
                         (self.hparams['lambda'] * -disc_loss))
             self.disc_opt.zero_grad()
@@ -224,8 +224,8 @@ class IRM(ERM):
     @staticmethod
     def _irm_penalty(logits, y):
         scale = torch.tensor(1.).cuda().requires_grad_()
-        loss_1 = nn.BCELosswithLogits()(logits[::2] * scale, y[::2])
-        loss_2 = nn.BCELosswithLogits()(logits[1::2] * scale, y[1::2])
+        loss_1 = nn.BCEWithLogitsLoss()(logits[::2] * scale, y[::2])
+        loss_2 = nn.BCEWithLogitsLoss()(logits[1::2] * scale, y[1::2])
         grad_1 = autograd.grad(loss_1, [scale], create_graph=True)[0]
         grad_2 = autograd.grad(loss_2, [scale], create_graph=True)[0]
         result = torch.sum(grad_1 * grad_2)
@@ -244,7 +244,7 @@ class IRM(ERM):
         for i, (x, y) in enumerate(minibatches):
             logits = all_logits[all_logits_idx:all_logits_idx + x.shape[0]]
             all_logits_idx += x.shape[0]
-            nll += nn.BCELosswithLogits()(logits, y)
+            nll += nn.BCEWithLogitsLoss()(logits, y)
             penalty += self._irm_penalty(logits, y)
         nll /= len(minibatches)
         penalty /= len(minibatches)
@@ -289,7 +289,7 @@ class VREx(ERM):
         for i, (x, y) in enumerate(minibatches):
             logits = all_logits[all_logits_idx:all_logits_idx + x.shape[0]]
             all_logits_idx += x.shape[0]
-            nll = nn.BCELosswithLogits()(logits, y)
+            nll = nn.BCEWithLogitsLoss()(logits, y)
             losses[i] = nll
 
         mean = losses.mean()
@@ -333,8 +333,8 @@ class Mixup(ERM):
             x = lam * xi + (1 - lam) * xj
             predictions = self.predict(x)
 
-            objective += lam * nn.BCELosswithLogits()(predictions, yi)
-            objective += (1 - lam) * nn.BCELosswithLogits()(predictions, yj)
+            objective += lam * nn.BCEWithLogitsLoss()(predictions, yi)
+            objective += (1 - lam) * nn.BCEWithLogitsLoss()(predictions, yj)
 
         objective /= len(minibatches)
 
@@ -365,7 +365,7 @@ class GroupDRO(ERM):
 
         for m in range(len(minibatches)):
             x, y = minibatches[m]
-            losses[m] = nn.BCELosswithLogits()(self.predict(x), y)
+            losses[m] = nn.BCEWithLogitsLoss()(self.predict(x), y)
             self.q[m] *= (self.hparams["groupdro_eta"] * losses[m].data).exp()
 
         self.q /= self.q.sum()
@@ -427,7 +427,7 @@ class MLDG(ERM):
                 weight_decay=self.hparams['weight_decay']
             )
 
-            inner_obj = nn.BCELosswithLogits()(inner_net(xi), yi)
+            inner_obj = nn.BCEWithLogitsLoss()(inner_net(xi), yi)
 
             inner_opt.zero_grad()
             inner_obj.backward()
@@ -444,7 +444,7 @@ class MLDG(ERM):
             objective += inner_obj.item()
 
             # this computes Gj on the clone-network
-            loss_inner_j = nn.BCELosswithLogits()(inner_net(xj), yj)
+            loss_inner_j = nn.BCEWithLogitsLoss()(inner_net(xj), yj)
             grad_inner_j = autograd.grad(loss_inner_j, inner_net.parameters(),
                 allow_unused=True)
 
@@ -483,11 +483,11 @@ class MLDG(ERM):
 
     #         for (xi, yi), (xj, yj) in random_pairs_of_minibatches(minibatches):
     #             for inner_iteration in range(inner_iterations):
-    #                 li = nn.BCELosswithLogits()(inner_network(xi), yi)
+    #                 li = nn.BCEWithLogitsLoss()(inner_network(xi), yi)
     #                 inner_optimizer.step(li)
     #
-    #             objective += nn.BCELosswithLogits()(self.network(xi), yi)
-    #             objective += beta * nn.BCELosswithLogits()(inner_network(xj), yj)
+    #             objective += nn.BCEWithLogitsLoss()(self.network(xi), yi)
+    #             objective += beta * nn.BCEWithLogitsLoss()(inner_network(xj), yj)
 
     #         objective /= len(minibatches)
     #         objective.backward()
@@ -557,7 +557,7 @@ class AbstractMMD(ERM):
         targets = [yi for _, yi in minibatches]
 
         for i in range(nmb):
-            objective += nn.BCELosswithLogits()(classifs[i], targets[i])
+            objective += nn.BCEWithLogitsLoss()(classifs[i], targets[i])
             for j in range(i + 1, nmb):
                 penalty += self.mmd(features[i], features[j])
 
@@ -623,7 +623,7 @@ class MTL(Algorithm):
     def update(self, minibatches):
         loss = 0
         for env, (x, y) in enumerate(minibatches):
-            loss += nn.BCELosswithLogits()(self.predict(x, env), y)
+            loss += nn.BCEWithLogitsLoss()(self.predict(x, env), y)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -737,14 +737,14 @@ class SagNet(Algorithm):
         # learn content
         self.optimizer_f.zero_grad()
         self.optimizer_c.zero_grad()
-        loss_c = nn.BCELosswithLogits()(self.forward_c(all_x), all_y)
+        loss_c = nn.BCEWithLogitsLoss()(self.forward_c(all_x), all_y)
         loss_c.backward()
         self.optimizer_f.step()
         self.optimizer_c.step()
 
         # learn style 
         self.optimizer_s.zero_grad()
-        loss_s = nn.BCELosswithLogits()(self.forward_s(all_x), all_y)
+        loss_s = nn.BCEWithLogitsLoss()(self.forward_s(all_x), all_y)
         loss_s.backward()
         self.optimizer_s.step()
        
@@ -809,7 +809,7 @@ class RSC(ERM):
         all_p_muted_again = self.classifier(all_f * mask)
 
         # Equation (5): update
-        loss = nn.BCELosswithLogits()(all_p_muted_again, all_y)
+        loss = nn.BCEWithLogitsLoss()(all_p_muted_again, all_y)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
