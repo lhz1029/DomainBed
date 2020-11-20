@@ -23,22 +23,22 @@ from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Domain generalization')
-    parser.add_argument('--data_dir', type=str)
-    parser.add_argument('--dataset', type=str, default="RotatedMNIST")
+    parser.add_argument('--data_dir', type=str, default='/scratch/wz727/chest_XR/DomainBed/data')
+    parser.add_argument('--dataset', type=str, default="chestXR")
     parser.add_argument('--algorithm', type=str, default="ERM")
     parser.add_argument('--hparams', type=str,
-        help='JSON-serialized hparams dict')
+                        help='JSON-serialized hparams dict')
     parser.add_argument('--hparams_seed', type=int, default=0,
-        help='Seed for random hparams (0 means "default hparams")')
+                        help='Seed for random hparams (0 means "default hparams")')
     parser.add_argument('--trial_seed', type=int, default=0,
-        help='Trial number (used for seeding split_dataset and '
-        'random_hparams).')
+                        help='Trial number (used for seeding split_dataset and '
+                             'random_hparams).')
     parser.add_argument('--seed', type=int, default=0,
-        help='Seed for everything else')
+                        help='Seed for everything else')
     parser.add_argument('--steps', type=int, default=None,
-        help='Number of steps. Default is dataset-dependent.')
+                        help='Number of steps. Default is dataset-dependent.')
     parser.add_argument('--checkpoint_freq', type=int, default=None,
-        help='Checkpoint every N steps. Default is dataset-dependent.')
+                        help='Checkpoint every N steps. Default is dataset-dependent.')
     parser.add_argument('--test_envs', type=int, nargs='+', default=[0])
     parser.add_argument('--output_dir', type=str, default="train_output")
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
