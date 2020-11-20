@@ -4,6 +4,7 @@
 Things that don't belong anywhere else
 """
 
+from argparse import ArgumentError
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ import numpy as np
 import torch
 import tqdm
 from collections import Counter
+from pytorch_lightning.metrics.functional.classification import f1_score, auroc
 
 def make_weights_for_balanced_classes(dataset):
     counts = Counter()
@@ -105,7 +107,7 @@ def random_pairs_of_minibatches(minibatches):
 
     return pairs
 
-def accuracy(network, loader, weights, device):
+def accuracy(network, loader, weights, device, strict=False):
     correct = 0
     total = 0
     weights_offset = 0
@@ -122,14 +124,45 @@ def accuracy(network, loader, weights, device):
                 batch_weights = weights[weights_offset : weights_offset + len(x)]
                 weights_offset += len(x)
             batch_weights = batch_weights.cuda()
-            if p.size(1) == 1:
-                correct += (p.gt(0).eq(y).float() * batch_weights).sum().item()
+            if strict:
+                correct += ((p.gt(0) == y).all().float() * batch_weights).sum().item()
             else:
-                correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
+                correct += ((p.gt(0) == y).float() * batch_weights).sum().item()
+            else:
+                raise("Metric not supported: ", metric)
+            # if p.size(1) == 1:
+            #     correct += (p.gt(0).eq(y).float() * batch_weights).sum().item()
+            # else:
+            #     correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
             total += batch_weights.sum().item()
     network.train()
 
     return correct / total
+
+
+def get_metric(network, loader, weights, device, metric):
+    if weights is not None:
+        raise ArgumentError("Non-uniform weights not supported")
+
+    network.eval()
+    ys = []
+    ps = []
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            ys.extend(y)
+            ps.extend(network.predict(x))
+        ps = ps.to(device)
+        ys = ys.to(device)
+        if metric == 'micro_f1':
+            result = f1_score(ps, ys, num_classes=None, class_reduction='micro')
+        elif metric == 'macro_f1':
+            result = f1_score(ps, ys, num_classes=None, class_reduction='macro')
+        elif metric == 'auroc':
+            result = auroc(ps, ys)
+    network.train()
+    return result
+
 
 class Tee:
     def __init__(self, fname, mode="a"):
