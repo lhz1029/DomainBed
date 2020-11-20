@@ -302,8 +302,8 @@ class CheXpertDataset(ChestDataset):
         self._image_paths = []
         self._labels = []
         self._mode = mode
-        self.dict = [{'1.0': '1', '': '0', '0.0': '0', '-1.0': '0'},
-                     {'1.0': '1', '': '0', '0.0': '0', '-1.0': '1'}, ]
+        self.dict = [{'1.0': True, '': False, '0.0': False, '-1.0': False},
+                     {'1.0': True, '': False, '0.0': False, '-1.0': True}, ]
         self._data_path = label_path.rsplit('/',2)[0]
         with open(label_path) as f:
             header = f.readline().strip('\n').split(',')
@@ -337,8 +337,8 @@ class MimicCXRDataset(ChestDataset):
         self._image_paths = []
         self._labels = []
         self._mode = mode
-        self.dict = [{'1.0': '1', '': '0', '0.0': '0', '-1.0': '0'},
-                     {'1.0': '1', '': '0', '0.0': '0', '-1.0': '1'}, ]
+        self.dict = [{'1.0': True, '': False, '0.0': False, '-1.0': False},
+                     {'1.0': True, '': False, '0.0': False, '-1.0': True}, ]
         self._data_path = label_path.rsplit('/',1)[0]
         with open(label_path) as f:
             header = f.readline().strip('\n').split(',')

@@ -170,8 +170,17 @@ if __name__ == "__main__":
 
             evals = zip(eval_loader_names, eval_loaders, eval_weights)
             for name, loader, weights in evals:
-                acc = misc.accuracy(algorithm, loader, weights, device)
+                acc = misc.accuracy(algorithm, loader, weights, device, strict=False)
                 results[name+'_acc'] = acc
+                strict_acc = misc.accuracy(algorithm, loader, weights, device, strict=True)
+                results[name+'_strict_acc'] = acc
+                auroc = misc.get_metric(algorithm, loader, weights, device, metric='auroc')
+                results[name+'_auroc'] = auroc
+                macro_f1 = misc.get_metric(algorithm, loader, weights, device, metric='macro_f1')
+                results[name+'_macro_f1'] = macro_f1
+                micro = misc.get_metric(algorithm, loader, weights, device, metric='micro_f1')
+                results[name+'_micro_f1'] = micro
+
 
             results_keys = sorted(results.keys())
             if results_keys != last_results_keys:
