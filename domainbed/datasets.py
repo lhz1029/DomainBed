@@ -422,9 +422,9 @@ class chestXR(MultipleDomainDataset):
             print(environment)
             path = os.path.join(root, environment)
             if environment == 'mimic-cxr':
-                env_dataset = MimicCXRDataset(paths[i] + '/targets.csv')
+                env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv')
             elif environment == 'chexpert':
-                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train.csv')
+                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train_sub.csv')
             elif environment == 'chestxr8':
                 env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv')
             elif environment == 'padchest':
