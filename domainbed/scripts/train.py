@@ -183,6 +183,8 @@ if __name__ == "__main__":
 
 
             results_keys = sorted(results.keys())
+            # for readability in the outfile, limit the number of columns
+            results_keys.remove([k for k in results_keys if '_acc' in k or 'f1' in k])
             if results_keys != last_results_keys:
                 misc.print_row(results_keys, colwidth=12)
                 last_results_keys = results_keys
