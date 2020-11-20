@@ -10,10 +10,10 @@ import cv2
 from PIL import Image, ImageFile
 from torchvision import transforms
 import torchvision.datasets.folder
-from torch.utils.data import TensorDataset
+from torch.utils.data import TensorDataset, Dataset
 from torchvision.datasets import MNIST, ImageFolder
 from torchvision.transforms.functional import rotate
-from utils import transform, GetTransforms
+from .utils import transform, GetTransforms
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -261,15 +261,15 @@ class SVIRO(MultipleEnvironmentImageFolder):
         self.dir = os.path.join(root, "sviro/")
         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
-class chestXR(MultipleEnvironmentImageFolder):
-    CHECKPOINT_FREQ = 1000
-    ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
-    def __init__(self, root, test_envs, hparams):
-        self.dir = ['/beegfs/wz727/mimic-cxr',
-                    '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
-                    '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
-                    '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
-        super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
+# class chestXR(MultipleEnvironmentImageFolder):
+#     CHECKPOINT_FREQ = 1000
+#     ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
+#     def __init__(self, root, test_envs, hparams):
+#         self.dir = ['/beegfs/wz727/mimic-cxr',
+#                     '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
+#                     '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
+#                     '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
+#         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
 
 
 class ChestDataset(Dataset):
@@ -401,33 +401,33 @@ class PadChestDataset(ChestDataset):
         self.cfg = cfg
         labels = pd.read_csv(label_path)
         positions = ['AP', 'PA', 'ANTEROPOSTERIOR', 'POSTEROANTERIOR']
-        labels = labels[pd.notnull(labels['ViewPosition_DICOM'])&labels['ViewPosition_DICOM'].str.match(positions)]
-        labels = labels[labels['Labels'].str.contains('|'.join([d.lower() for d in diseases] + ['normal']))]
+        labels = labels[pd.notnull(labels['ViewPosition_DICOM'])&labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
+        labels = labels[pd.notnull(labels['Labels'])&labels['Labels'].str.contains('|'.join([d.lower() for d in diseases] + ['normal']))]
         self._image_paths = [os.path.join(self._data_path, name) for name in labels['ImageID'].values]
         self._labels = get_labels(labels['Labels'].values)
         self._num_image = len(self._image_paths)
         assert len(self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
-class ChestXRImageFolder(MultipleDomainDataset):
-    def __init__(self, root, test_envs, augment, hparams):
+class chestXR(MultipleDomainDataset):
+    def __init__(self, root, test_envs, hparams):
         super().__init__()
         environments = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
         paths = ['/beegfs/wz727/mimic-cxr',
                 '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
                 '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
-                '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
-
+                '/scratch/lhz209/padchest']
         self.datasets = []
         for i, environment in enumerate(environments):
+            print(environment)
             path = os.path.join(root, environment)
-            if environments[i] == 'mimic-cxr':
+            if environment == 'mimic-cxr':
                 env_dataset = MimicCXRDataset(paths[i] + '/targets.csv')
-            elif environment[i] == 'chexpert':
+            elif environment == 'chexpert':
                 env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train.csv')
-            elif environment[i] == 'chestxr8':
+            elif environment == 'chestxr8':
                 env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv')
-            elif environment[i] == 'padchest':
+            elif environment == 'padchest':
                 env_dataset = PadChestDataset(paths[i] + '/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv')
             else:
                 raise Exception('Unknown environments')
@@ -435,5 +435,5 @@ class ChestXRImageFolder(MultipleDomainDataset):
 
             self.datasets.append(env_dataset)
 
-        self.input_shape = (3, 224, 224,)
-        self.num_classes = len(self.datasets[-1].classes)
+        self.input_shape = (3, 512, 512,)
+        self.num_classes = 5
