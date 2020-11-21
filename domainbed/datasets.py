@@ -459,7 +459,7 @@ class chestXR(MultipleDomainDataset):
             elif environment == 'chestxr8':
                 env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv')
             elif environment == 'padchest':
-                env_dataset = PadChestDataset(paths[i] + '/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv')
+                env_dataset = PadChestDataset(paths[i] + '/padchest_labels.csv')
             else:
                 raise Exception('Unknown environments')
 

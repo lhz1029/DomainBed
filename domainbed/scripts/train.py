@@ -35,9 +35,9 @@ if __name__ == "__main__":
                              'random_hparams).')
     parser.add_argument('--seed', type=int, default=0,
                         help='Seed for everything else')
-    parser.add_argument('--steps', type=int, default=None,
+    parser.add_argument('--steps', type=int, default=100000,
                         help='Number of steps. Default is dataset-dependent.')
-    parser.add_argument('--checkpoint_freq', type=int, default=None,
+    parser.add_argument('--checkpoint_freq', type=int, default=10000,
                         help='Checkpoint every N steps. Default is dataset-dependent.')
     parser.add_argument('--test_envs', type=int, nargs='+', default=[0])
     parser.add_argument('--output_dir', type=str, default="train_output")
@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
     # If we ever want to implement checkpointing, just persist these values
     # every once in a while, and then load them from disk here.
-    start_step = 0
+    start_step = 1
     algorithm_dict = None
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -112,6 +112,8 @@ if __name__ == "__main__":
         in_splits.append((in_, in_weights))
         out_splits.append((out, out_weights))
 
+    dataset.N_WORKERS = 1
+    hparams['batch_size'] = 8
     train_loaders = [InfiniteDataLoader(
         dataset=env,
         weights=env_weights,
@@ -122,18 +124,18 @@ if __name__ == "__main__":
 
     eval_loaders = [FastDataLoader(
         dataset=env,
-        batch_size=64,
+        batch_size=hparams['batch_size'],
         num_workers=dataset.N_WORKERS)
         for env, _ in (in_splits + out_splits)]
     eval_weights = [None for _, weights in (in_splits + out_splits)]
     eval_loader_names = ['env{}_in'.format(i)
-        for i in range(len(in_splits))]
+                         for i in range(len(in_splits))]
     eval_loader_names += ['env{}_out'.format(i)
-        for i in range(len(out_splits))]
+                          for i in range(len(out_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
     algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
-        len(dataset) - len(args.test_envs), hparams)
+                                len(dataset) - len(args.test_envs), hparams)
 
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)
@@ -174,8 +176,9 @@ if __name__ == "__main__":
                 results[name+'_acc'] = acc
                 strict_acc = misc.accuracy(algorithm, loader, weights, device, strict=True)
                 results[name+'_strict_acc'] = acc
-                auroc = misc.get_metric(algorithm, loader, weights, device, metric='auroc')
-                results[name+'_auroc'] = auroc
+                aurocs = misc.get_metric(algorithm, loader, weights, device, metric='auroc')
+                for i, auroc in enumerate(aurocs):
+                    results[name+f'_auroc{i}'] = auroc
                 macro_f1 = misc.get_metric(algorithm, loader, weights, device, metric='macro_f1')
                 results[name+'_macro_f1'] = macro_f1
                 micro = misc.get_metric(algorithm, loader, weights, device, metric='micro_f1')

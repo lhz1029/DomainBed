@@ -167,10 +167,10 @@ class AbstractDANN(Algorithm):
         if self.class_balance:
             y_counts = F.one_hot(all_y).sum(dim=0)
             weights = 1. / (y_counts[all_y] * y_counts.shape[0]).float()
-            disc_loss = nn.BCEWithLogitsLoss()(disc_out, disc_labels, reduction='none')
+            disc_loss = nn.CrossEntropyLoss()(disc_out, disc_labels, reduction='none')
             disc_loss = (weights * disc_loss).sum()
         else:
-            disc_loss = nn.BCEWithLogitsLoss()(disc_out, disc_labels)
+            disc_loss = nn.CrossEntropyLoss()(disc_out, disc_labels)
 
         disc_softmax = F.softmax(disc_out, dim=1)
         input_grad = autograd.grad(disc_softmax[:, disc_labels].sum(),

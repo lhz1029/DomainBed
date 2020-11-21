@@ -32,7 +32,7 @@ def hpc_launcher(commands):
         f.write(f"#SBATCH --array=1-{num_tasks}\n")
         f.write("#SBATCH --gres=gpu:1\n")
         f.write("#SBATCH --mem=32GB\n")
-        f.write("#SBATCH --time=1:00:00\n")
+        f.write("#SBATCH --time=5-12:00:00\n")
 
         f.write("srun $(head -n $SLURM_ARRAY_TASK_ID jobs.txt | tail -n 1)")
     subprocess.call("sbatch -vv submit.sh", shell=True)

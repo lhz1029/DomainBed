@@ -13,6 +13,7 @@ from shutil import copyfile
 
 import numpy as np
 import torch
+import torch.nn as nn
 import tqdm
 from collections import Counter
 from pytorch_lightning.metrics.functional.classification import f1_score, auroc
@@ -125,18 +126,15 @@ def accuracy(network, loader, weights, device, strict=False):
                 weights_offset += len(x)
             batch_weights = batch_weights.cuda()
             if strict:
-                correct += ((p.gt(0) == y).all().float() * batch_weights).sum().item()
+                correct += ((p.gt(0) == y).all().float() * batch_weights.reshape((-1, 1))).sum().item()
             else:
-                correct += ((p.gt(0) == y).float() * batch_weights).sum().item()
-            else:
-                raise("Metric not supported: ", metric)
+                correct += ((p.gt(0) == y).float() * batch_weights.reshape((-1, 1))).sum().item()
             # if p.size(1) == 1:
             #     correct += (p.gt(0).eq(y).float() * batch_weights).sum().item()
             # else:
             #     correct += (p.argmax(1).eq(y).float() * batch_weights).sum().item()
             total += batch_weights.sum().item()
     network.train()
-
     return correct / total
 
 
@@ -147,19 +145,22 @@ def get_metric(network, loader, weights, device, metric):
     network.eval()
     ys = []
     ps = []
+    sigmoid = nn.Sigmoid()
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device)
             ys.extend(y)
-            ps.extend(network.predict(x))
-        ps = ps.to(device)
-        ys = ys.to(device)
+            ps.extend(sigmoid(network.predict(x)))
+        ps = torch.stack(ps).to(device)
+        ys = torch.stack(ys).to(device)
         if metric == 'micro_f1':
             result = f1_score(ps, ys, num_classes=None, class_reduction='micro')
         elif metric == 'macro_f1':
             result = f1_score(ps, ys, num_classes=None, class_reduction='macro')
         elif metric == 'auroc':
-            result = auroc(ps, ys)
+            result = []
+            for d in range(ps.size(1)):
+                result.append(auroc(ps[:, d], ys[:, d]))
     network.train()
     return result
 
