@@ -172,17 +172,19 @@ if __name__ == "__main__":
 
             evals = zip(eval_loader_names, eval_loaders, eval_weights)
             for name, loader, weights in evals:
-                acc = misc.accuracy(algorithm, loader, weights, device, strict=False)
-                results[name+'_acc'] = acc
-                strict_acc = misc.accuracy(algorithm, loader, weights, device, strict=True)
-                results[name+'_strict_acc'] = acc
-                aurocs = misc.get_metric(algorithm, loader, weights, device, metric='auroc')
-                for i, auroc in enumerate(aurocs):
-                    results[name+f'_auroc{i}'] = auroc
-                macro_f1 = misc.get_metric(algorithm, loader, weights, device, metric='macro_f1')
-                results[name+'_macro_f1'] = macro_f1
-                micro = misc.get_metric(algorithm, loader, weights, device, metric='micro_f1')
-                results[name+'_micro_f1'] = micro
+                metrics = misc.get_metrics(algorithm, loader, weights, device, name)
+                results.update(metrics)
+                # acc = misc.accuracy(algorithm, loader, weights, device, strict=False)
+                # results[name+'_acc'] = acc
+                # strict_acc = misc.accuracy(algorithm, loader, weights, device, strict=True)
+                # results[name+'_strict_acc'] = acc
+                # aurocs = misc.get_metric(algorithm, loader, weights, device, metric='auroc')
+                # for i, auroc in enumerate(aurocs):
+                #     results[name+f'_auroc{i}'] = auroc
+                # macro_f1 = misc.get_metric(algorithm, loader, weights, device, metric='macro_f1')
+                # results[name+'_macro_f1'] = macro_f1
+                # micro = misc.get_metric(algorithm, loader, weights, device, metric='micro_f1')
+                # results[name+'_micro_f1'] = micro
 
 
             results_keys = sorted(results.keys())
