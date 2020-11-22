@@ -142,6 +142,7 @@ def get_metrics(network, loader, weights, device, name):
     correct = 0
     strict_correct = 0
     total = 0
+    strict_total = 0
     weights_offset = 0
     ys = []
     ps = []
@@ -152,29 +153,30 @@ def get_metrics(network, loader, weights, device, name):
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
-            p = network.predict(x)
-            ys.extend(y)
-            ps.extend(sigmoid(p))
+            p = sigmoid(network.predict(x))
+            ys.append(y)
+            ps.append(p)
             if weights is None:
                 batch_weights = torch.ones(len(x))
             else:
                 batch_weights = weights[weights_offset : weights_offset + len(x)]
                 weights_offset += len(x)
-            batch_weights = batch_weights.cuda()
-            strict_correct += ((p.gt(0) == y).all().float() * batch_weights.reshape((-1, 1))).sum().item()
-            correct += ((p.gt(0) == y).float() * batch_weights.reshape((-1, 1))).sum().item()
-            total += batch_weights.sum().item()
-        ps = torch.stack(ps).to(device)
-        ys = torch.stack(ys).to(device)
-        micro_f1 = f1_score(ps.gt(.5), ys, num_classes=None, class_reduction='micro')
-        macro_f1 = f1_score(ps.gt(.5), ys, num_classes=None, class_reduction='macro')
+            batch_weights = batch_weights.to(device)
+            strict_correct += ((p.gt(.5) == y).all().float() * batch_weights.reshape((-1, 1))).sum().item()
+            correct += ((p.gt(.5) == y).float() * batch_weights.reshape((-1, 1))).sum().item()
+            total += p.size(0) * p.size(1)
+            strict_total += batch_weights.sum().item()
+        ps = torch.cat(ps).to(device)
+        ys = torch.cat(ys).to(device)
+        micro_f1 = f1_score(ps.gt(.5).float(), ys, num_classes=None, class_reduction='micro')
+        macro_f1 = f1_score(ps.gt(.5).float(), ys, num_classes=None, class_reduction='macro')
         aucs = []
         for d in range(ps.size(1)):
             aucs.append(auroc(ps[:, d], ys[:, d]))
     network.train()
     results = {
         f'{name}_acc': correct / total,
-        f'{name}_strict_acc': strict_correct / total,
+        f'{name}_strict_acc': strict_correct / strict_total,
         f'{name}_auc': aucs,
         f'{name}_micro_f1': micro_f1,
         f'{name}_macro_f1': macro_f1
