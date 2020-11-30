@@ -333,7 +333,7 @@ class CheXpertDataset(ChestDataset):
                 header[11],
                 header[13],
                 header[15]])
-            for line in f:
+            for _, line in zip(range(6), f):
                 labels = []
                 fields = line.strip('\n').split(',')
                 image_path = self._data_path + '/' + fields[0]
@@ -368,7 +368,7 @@ class MimicCXRDataset(ChestDataset):
                 header[4],
                 header[2],
                 header[13]])
-            for line in f:
+            for _, line in zip(range(6), f):
                 labels = []
                 fields = line.strip('\n').split(',')
                 subject_id, study_id, dicom_id, split = fields[0], fields[1], fields[-3], fields[-1]
@@ -385,6 +385,8 @@ class MimicCXRDataset(ChestDataset):
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
+        # self._labels = np.concatenate([np.identity(5), np.zeros((1, 5))])
+        self._labels = np.concatenate([np.zeros((1, 5)), np.identity(5)])
         self._num_image = len(self._image_paths)
 
 
@@ -403,6 +405,7 @@ class ChestXR8Dataset(ChestDataset):
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
         labels = pd.read_csv(label_path)
+        labels = labels.head(6)
         labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
         self._image_paths = [os.path.join(self._data_path, 'images', name) for name in labels['Image Index'].values]
         self._labels = get_labels(labels['Finding Labels'].values)
@@ -425,6 +428,7 @@ class PadChestDataset(ChestDataset):
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
         labels = pd.read_csv(label_path)
+        labels = labels.head(6)
         positions = ['AP', 'PA', 'ANTEROPOSTERIOR', 'POSTEROANTERIOR']
         labels = labels[
             pd.notnull(labels['ViewPosition_DICOM']) & labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
@@ -441,7 +445,7 @@ class chestXR(MultipleDomainDataset):
     ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
     N_STEPS = 100000  # Default, subclasses may override
     CHECKPOINT_FREQ = 5000  # Default, subclasses may override
-    N_WORKERS = 4
+    N_WORKERS = 1
     def __init__(self, root, test_envs, hparams):
         super().__init__()
         paths = ['/beegfs/wz727/mimic-cxr',
@@ -451,7 +455,6 @@ class chestXR(MultipleDomainDataset):
         self.datasets = []
         for i, environment in enumerate(chestXR.ENVIRONMENTS):
             print(environment)
-            path = os.path.join(root, environment)
             if environment == 'mimic-cxr':
                 env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv')
             elif environment == 'chexpert':
@@ -467,3 +470,4 @@ class chestXR(MultipleDomainDataset):
 
         self.input_shape = (3, 512, 512,)
         self.num_classes = 5
+

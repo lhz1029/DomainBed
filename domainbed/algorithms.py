@@ -148,6 +148,7 @@ class AbstractDANN(Algorithm):
             lr=self.hparams["lr_g"],
             weight_decay=self.hparams['weight_decay_g'],
             betas=(self.hparams['beta1'], 0.9))
+        self.num_classes = num_classes
 
     def update(self, minibatches):
         self.update_count += 1
@@ -155,7 +156,14 @@ class AbstractDANN(Algorithm):
         all_y = torch.cat([y for x, y in minibatches])
         all_z = self.featurizer(all_x)
         if self.conditional:
-            disc_input = all_z + self.class_embeddings(all_y)
+            disc_input = all_z
+            for i in range(self.num_classes):
+                # y = torch.zeros_like(all_y).long()
+                y = all_y[:, i].gt(0).long()
+                print(disc_input.shape)
+                print(y.shape)
+                print(self.class_embeddings(y).shape)
+                disc_input += self.class_embeddings(y)
         else:
             disc_input = all_z
         disc_out = self.discriminator(disc_input)
@@ -165,7 +173,7 @@ class AbstractDANN(Algorithm):
         ])
 
         if self.class_balance:
-            y_counts = F.one_hot(all_y).sum(dim=0)
+            y_counts = F.one_hot(all_y.long()).sum(dim=0)
             weights = 1. / (y_counts[all_y] * y_counts.shape[0]).float()
             disc_loss = nn.CrossEntropyLoss()(disc_out, disc_labels, reduction='none')
             disc_loss = (weights * disc_loss).sum()
@@ -776,7 +784,7 @@ class RSC(ERM):
         # labels
         all_y = torch.cat([y for _, y in minibatches])
         # one-hot labels
-        all_o = torch.nn.functional.one_hot(all_y, self.num_classes)
+        all_o = torch.nn.functional.one_hot(all_y.long(), self.num_classes)
         # features
         all_f = self.featurizer(all_x)
         # predictions

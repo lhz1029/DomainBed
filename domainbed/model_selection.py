@@ -35,7 +35,7 @@ class SelectionMethod:
             .filter_not_none()
             .sorted(key=lambda ra: ra['val_acc']))
         if len(sorted_run_accs):
-            return sorted_run_accs[-1]['test_acc']
+            return sorted_run_accs[-1].get('test_acc', None)
         else:
             return None
 
@@ -52,12 +52,12 @@ class OracleSelectionMethod(SelectionMethod):
         if not len(run_records):
             return None
         test_env = run_records[0]['args']['test_envs'][0]
-        test_out_acc_key = 'env{}_out_acc'.format(test_env)
-        test_in_acc_key = 'env{}_in_acc'.format(test_env)
+        test_out_acc_key = 'env{}_out_auc'.format(test_env)
+        test_in_acc_key = 'env{}_out_auc'.format(test_env)
         chosen_record = run_records.sorted(lambda r: r['step'])[-1]
         return {
-            'val_acc':  chosen_record[test_out_acc_key],
-            'test_acc': chosen_record[test_in_acc_key]
+            'val_acc':  np.mean(chosen_record[test_out_acc_key]),
+            'test_acc': np.mean(chosen_record.get(test_in_acc_key, None))
         }
 
 class IIDAccuracySelectionMethod(SelectionMethod):
@@ -70,15 +70,18 @@ class IIDAccuracySelectionMethod(SelectionMethod):
         test_env = record['args']['test_envs'][0]
         val_env_keys = []
         for i in itertools.count():
-            if f'env{i}_out_acc' not in record:
+            if f'env{i}_out_auc' not in record:
                 break
             if i != test_env:
-                val_env_keys.append(f'env{i}_out_acc')
-        test_in_acc_key = 'env{}_in_acc'.format(test_env)
-        return {
+                val_env_keys.append(f'env{i}_out_auc')
+        test_in_acc_key = 'env{}_out_auc'.format(test_env)
+        d = {
+            'test_acc': np.mean(record[test_in_acc_key]),
             'val_acc': np.mean([record[key] for key in val_env_keys]),
-            'test_acc': record[test_in_acc_key]
         }
+        # if test_in_acc_key in record:
+        return d
+            
 
     @classmethod
     def run_acc(self, run_records):
