@@ -35,6 +35,7 @@ DATASETS = [
 ]
 
 diseases = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pneumonia']
+# diseases = ['Pneumonia']
 
 
 def get_dataset_class(dataset_name):
@@ -303,7 +304,7 @@ class ChestDataset(Dataset):
             image = GetTransforms(image, type=self.cfg.use_transforms_type)
         image = np.array(image)
         image = transform(image, self.cfg)
-        labels = np.array(self._labels[idx]).astype(np.float32)
+        labels = np.array([self._labels[idx][-1]]).astype(np.float32)
 
         path = self._image_paths[idx]
         if self._mode == 'train' or self._mode == 'dev':
@@ -332,7 +333,7 @@ class CheXpertDataset(ChestDataset):
                 header[10],
                 header[11],
                 header[13],
-                header[15]])
+                header[12]])
             for line in f:
                 labels = []
                 fields = line.strip('\n').split(',')
@@ -340,12 +341,16 @@ class CheXpertDataset(ChestDataset):
                 for index, value in enumerate(fields[5:]):
                     if index == 5 or index == 8:
                         labels.append(self.dict[1].get(value))
-                    elif index == 2 or index == 6 or index == 10:
+                    elif index == 2 or index == 6 or index == 7:
                         labels.append(self.dict[0].get(value))
                 labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
+                if self._mode == 'train' and labels[-1] == 1:
+                    for i in range(40):
+                        self._image_paths.append(image_path)
+                        self._labels.append(labels)
         self._num_image = len(self._image_paths)
 
 
@@ -385,6 +390,10 @@ class MimicCXRDataset(ChestDataset):
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
+                if self._mode == 'train' and labels[-1] == 1:
+                    for i in range(8):
+                        self._image_paths.append(image_path)
+                        self._labels.append(labels)
         self._num_image = len(self._image_paths)
 
 
@@ -404,11 +413,17 @@ class ChestXR8Dataset(ChestDataset):
             self.cfg = edict(json.load(f))
         labels = pd.read_csv(label_path)
         labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
+        if self._mode == 'train':
+            labels_neg = labels[labels['Finding Labels'].str.contains('No Finding')]
+            labels_pos = labels[~labels['Finding Labels'].str.contains('No Finding')]
+            upweight_ratio = len(labels_neg)/len(labels_pos)
+            labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
+            labels = pd.concat([labels_neg, labels_pos])
         self._image_paths = [os.path.join(self._data_path, 'images', name) for name in labels['Image Index'].values]
         self._labels = get_labels(labels['Finding Labels'].values)
         self._num_image = len(self._image_paths)
-        assert len(
-            self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
+        # assert len(
+            # self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class PadChestDataset(ChestDataset):
@@ -430,11 +445,17 @@ class PadChestDataset(ChestDataset):
             pd.notnull(labels['ViewPosition_DICOM']) & labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
         labels = labels[pd.notnull(labels['Labels']) & labels['Labels'].str.contains(
             '|'.join([d.lower() for d in diseases] + ['normal']))]
+        if self._mode == 'train':
+            labels_neg = labels[labels['Labels'].str.contains('normal')]
+            labels_pos = labels[~labels['Labels'].str.contains('normal')]
+            upweight_ratio = len(labels_neg)/len(labels_pos)
+            labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
+            labels = pd.concat([labels_neg, labels_pos])
         self._image_paths = [os.path.join(self._data_path, name) for name in labels['ImageID'].values]
         self._labels = get_labels(labels['Labels'].values)
         self._num_image = len(self._image_paths)
-        assert len(
-            self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
+        # assert len(
+            # self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class chestXR(MultipleDomainDataset):
@@ -466,4 +487,4 @@ class chestXR(MultipleDomainDataset):
             self.datasets.append(env_dataset)
 
         self.input_shape = (3, 512, 512,)
-        self.num_classes = 5
+        self.num_classes = 1

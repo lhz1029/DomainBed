@@ -156,14 +156,11 @@ class AbstractDANN(Algorithm):
         all_y = torch.cat([y for x, y in minibatches])
         all_z = self.featurizer(all_x)
         if self.conditional:
-            disc_input = all_z
-            for i in range(self.num_classes):
-                # y = torch.zeros_like(all_y).long()
-                y = all_y[:, i].gt(0).long()
-                print(disc_input.shape)
-                print(y.shape)
-                print(self.class_embeddings(y).shape)
-                disc_input += self.class_embeddings(y)
+            disc_input = all_z + self.class_embeddings(all_y[:, 0].long())
+            # for i in range(self.num_classes):
+            #     # y = torch.zeros_like(all_y).long()
+            #     y = all_y[:, i].gt(0).long()
+            #     disc_input += self.class_embeddings(y)
         else:
             disc_input = all_z
         disc_out = self.discriminator(disc_input)
@@ -173,8 +170,8 @@ class AbstractDANN(Algorithm):
         ])
 
         if self.class_balance:
-            y_counts = F.one_hot(all_y.long()).sum(dim=0)
-            weights = 1. / (y_counts[all_y] * y_counts.shape[0]).float()
+            y_counts = F.one_hot(all_y[:, 0].long()).sum(dim=0)
+            weights = 1. / (y_counts[all_y[:, 0].bool()] * y_counts.shape[0]).float()
             disc_loss = nn.CrossEntropyLoss()(disc_out, disc_labels, reduction='none')
             disc_loss = (weights * disc_loss).sum()
         else:
