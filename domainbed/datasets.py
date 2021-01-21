@@ -34,7 +34,7 @@ DATASETS = [
     'chestXR'
 ]
 
-# diseases = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pneumonia']
+all_diseases = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pneumonia']
 diseases = ['Pneumonia']
 csv_path = '/scratch/wz727/chestXR/data/labels/'
 
@@ -97,6 +97,7 @@ class CheXpertDataset(ChestDataset):
                 header[11],
                 header[12],
                 header[13]])
+            self._idx = np.array([all_diseases.index(d) for d in diseases])
             for line in f:
                 labels = []
                 fields = line.strip('\n').split(',')
@@ -110,10 +111,17 @@ class CheXpertDataset(ChestDataset):
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
-                if self._mode == 'train' and labels[-1] == 1:
-                    for i in range(30):
-                        self._image_paths.append(image_path)
-                        self._labels.append(labels)
+        self._image_paths = np.array(self._image_paths)
+        self._labels = np.array(self._labels)
+        if self._mode == 'train':
+            ratio = (len(self._labels) - self._labels.sum(axis=0)) // self._labels.sum(axis=0) - 1
+            ratio = ratio[self._idx][0]
+            pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
+            if ratio >= 1:
+                up_idx = np.concatenate((np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
+                self._image_paths = self._image_paths[up_idx]
+                self._labels = self._labels[up_idx]
+        self._labels = self._labels[:, self._idx]
         self._num_image = len(self._image_paths)
 
 
@@ -161,10 +169,17 @@ class MimicCXRDataset(ChestDataset):
                 self._image_paths.append(image_path)
                 assert os.path.exists(image_path), image_path
                 self._labels.append(labels)
-                if self._mode == 'train' and labels[-1] == 1:
-                    for i in range(12):
-                        self._image_paths.append(image_path)
-                        self._labels.append(labels)
+        self._image_paths = np.array(self._image_paths)
+        self._labels = np.array(self._labels)
+        if self._mode == 'train':
+            ratio = (len(self._labels) - self._labels.sum(axis=0)) // self._labels.sum(axis=0) - 1
+            ratio = ratio[self._idx][0]
+            pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
+            if ratio >= 1:
+                up_idx = np.concatenate((np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
+                self._image_paths = self._image_paths[up_idx]
+                self._labels = self._labels[up_idx]
+        self._labels = self._labels[:, self._idx]
         self._num_image = len(self._image_paths)
 
 

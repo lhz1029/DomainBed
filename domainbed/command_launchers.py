@@ -39,7 +39,7 @@ def hpc_launcher(commands):
         f.write("#!/bin/bash\n")
         f.write("#SBATCH --cpus-per-task=8\n")
         # f.write("#SBATCH --mem-per-cpu=1GB\n")
-        # f.write("#SBATCH --partition=p40_4,p100_4,v100_sxm2_4,v100_pci_2\n")
+        f.write("#SBATCH --partition=rtx8000\n")
         f.write(f"#SBATCH --array=1-{num_tasks}\n")
         f.write("#SBATCH --gres=gpu\n")
         f.write("#SBATCH --mem=64GB\n")
