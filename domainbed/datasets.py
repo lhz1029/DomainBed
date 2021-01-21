@@ -79,38 +79,39 @@ class ChestDataset(Dataset):
 
 class CheXpertDataset(ChestDataset):
     def __init__(self, label_path, cfg='configs/chexpert_config.json', mode='train', upsample=True):
+        def get_labels(labels):
+            all_labels = []
+            for _, row in labels.iterrows():
+                all_labels.append([row[d] in [1, -1] for d in diseases])
+            return all_labels
+
+        def get_image_paths(labels):
+            self._data_path = label_path.rsplit('/', 2)[0]
+            all_paths = []
+            for _, row in labels.iterrows():
+                all_paths.append(self._data_path + '/' + row['Path'])
+            return all_paths
+
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
         self._label_header = None
         self._image_paths = []
         self._labels = []
         self._mode = mode
-        self.dict = [{'1.0': True, '': False, '0.0': False, '-1.0': False},
-                     {'1.0': True, '': False, '0.0': False, '-1.0': True}, ]
-        self._data_path = label_path.rsplit('/', 2)[0]
-        label_path = csv_path + 'chexpert_{}.csv'.format(mode)
-        with open(label_path) as f:
-            header = f.readline().strip('\n').split(',')
-            self._label_header = np.array([
-                header[7],
-                header[10],
-                header[11],
-                header[12],
-                header[13]])
-            self._idx = np.array([all_diseases.index(d) for d in diseases])
-            for line in f:
-                labels = []
-                fields = line.strip('\n').split(',')
-                image_path = self._data_path + '/' + fields[0]
-                for index, value in enumerate(fields[5:]):
-                    if index == 5 or index == 8:
-                        labels.append(self.dict[1].get(value))
-                    elif index == 2 or index == 6 or index == 7:
-                        labels.append(self.dict[0].get(value))
-                labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
-                self._image_paths.append(image_path)
-                assert os.path.exists(image_path), image_path
-                self._labels.append(labels)
+        labels_path = csv_path + 'chexpert_{}.csv'.format(mode)
+        df = pd.read_csv(labels_path)
+        # subsetting the data
+        # TODO: validation at some point should not be subsetted
+        uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
+        if uncertain_diseases:
+            mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+        else:
+            mask = (df[diseases + ['No Finding']] == 1).any(1)
+        labels = df[mask]
+        labels.fillna(0, inplace=True)
+        self._labels = get_labels(labels)
+        self._image_paths = get_image_paths(labels)
+        self._idx = np.array([diseases.index(d) for d in diseases])
         self._image_paths = np.array(self._image_paths)
         self._labels = np.array(self._labels)
         if self._mode == 'train' and upsample:
@@ -127,48 +128,45 @@ class CheXpertDataset(ChestDataset):
 
 class MimicCXRDataset(ChestDataset):
     def __init__(self, label_path, cfg='configs/mimic_config.json', mode='train', upsample=True):
+        def get_labels(labels):
+            all_labels = []
+            for _, row in labels.iterrows():
+                all_labels.append([row[d] in [1, -1] for d in diseases])
+            return all_labels
+        
+        def get_image_paths(labels):
+            all_paths = []
+            for _, row in labels.iterrows():
+                if int(str(row['subject_id'])[:2]) < 15:
+                    data_path = '/mimic-cxr_1'
+                else:
+                    data_path = '/mimic-cxr_2'
+                all_paths.append(
+                    data_path + '/p' + str(row['subject_id'])[:2] + '/p' + str(row['subject_id']) + \
+                    '/s' + str(row['study_id']) + '/' + str(row['dicom_id']) + '.jpg'
+                )
+            return all_paths
+
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
         self._label_header = None
         self._image_paths = []
         self._labels = []
         self._mode = mode
-        self.dict = [{'1.0': True, '': False, '0.0': False, '-1.0': False},
-                     {'1.0': True, '': False, '0.0': False, '-1.0': True}, ]
-        self._data_path = ""
         label_path = csv_path + 'mimic_{}.csv'.format(mode)
-        print(label_path)
-        with open(label_path) as f:
-            header = f.readline().strip('\n').split(',')
-            self._label_header = np.array([
-                header[2],
-                header[3],
-                header[4],
-                header[5],
-                header[13]])
-            for line in f:
-                labels = []
-                fields = line.strip('\n').split(',')
-                subject_id, study_id, dicom_id, split = fields[0], fields[1], fields[-3], fields[-1]
-                # if split != mode:
-                #     continue
-                if dicom_id == '':
-                    continue
-                if int(subject_id[:2]) < 15:
-                    self._data_path = '/mimic-cxr_1'
-                else:
-                    self._data_path = '/mimic-cxr_2'
-                image_path = self._data_path + '/p' + subject_id[:2] + '/p' + subject_id + \
-                             '/s' + study_id + '/' + dicom_id + '.jpg'
-                for index, value in enumerate(fields[2:]):
-                    if index == 3 or index == 0:
-                        labels.append(self.dict[1].get(value))
-                    elif index == 1 or index == 2 or index == 11:
-                        labels.append(self.dict[0].get(value))
-                labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
-                self._image_paths.append(image_path)
-                assert os.path.exists(image_path), image_path
-                self._labels.append(labels)
+        df = pd.read_csv(label_path)
+        # subsetting the data
+        # TODO: validation at some point should not be subsetted
+        uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
+        if uncertain_diseases:
+            mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+        else:
+            mask = (df[diseases + ['No Finding']] == 1).any(1)
+        labels = df[mask & (df['dicom_id'] != '')]
+        labels.fillna(0, inplace=True)
+        self._labels = get_labels(labels)
+        self._image_paths = get_image_paths(labels)
+        self._idx = np.array([diseases.index(d) for d in diseases])
         self._image_paths = np.array(self._image_paths)
         self._labels = np.array(self._labels)
         if self._mode == 'train' and upsample:
@@ -179,7 +177,7 @@ class MimicCXRDataset(ChestDataset):
                 up_idx = np.concatenate((np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
                 self._image_paths = self._image_paths[up_idx]
                 self._labels = self._labels[up_idx]
-        self._labels = self._labels[:, self._idx]
+        # self._labels = self._labels[:, self._idx]
         self._num_image = len(self._image_paths)
 
 
