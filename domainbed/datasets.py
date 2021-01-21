@@ -78,7 +78,7 @@ class ChestDataset(Dataset):
 
 
 class CheXpertDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/chexpert_config.json', mode='train'):
+    def __init__(self, label_path, cfg='configs/chexpert_config.json', mode='train', upsample=True):
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
         self._label_header = None
@@ -104,7 +104,7 @@ class CheXpertDataset(ChestDataset):
                 image_path = self._data_path + '/' + fields[0]
                 for index, value in enumerate(fields[5:]):
                     if index == 5 or index == 8:
-                        labels.append(self.dict[1].get(value))
+                labels.append(self.dict[1].get(value))
                     elif index == 2 or index == 6 or index == 7:
                         labels.append(self.dict[0].get(value))
                 labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
@@ -113,7 +113,7 @@ class CheXpertDataset(ChestDataset):
                 self._labels.append(labels)
         self._image_paths = np.array(self._image_paths)
         self._labels = np.array(self._labels)
-        if self._mode == 'train':
+        if self._mode == 'train' and upsample:
             ratio = (len(self._labels) - self._labels.sum(axis=0)) // self._labels.sum(axis=0) - 1
             ratio = ratio[self._idx][0]
             pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
@@ -126,7 +126,7 @@ class CheXpertDataset(ChestDataset):
 
 
 class MimicCXRDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/mimic_config.json', mode='train'):
+    def __init__(self, label_path, cfg='configs/mimic_config.json', mode='train', upsample=True):
         with open(cfg) as f:
             self.cfg = edict(json.load(f))
         self._label_header = None
@@ -171,7 +171,7 @@ class MimicCXRDataset(ChestDataset):
                 self._labels.append(labels)
         self._image_paths = np.array(self._image_paths)
         self._labels = np.array(self._labels)
-        if self._mode == 'train':
+        if self._mode == 'train' and upsample:
             ratio = (len(self._labels) - self._labels.sum(axis=0)) // self._labels.sum(axis=0) - 1
             ratio = ratio[self._idx][0]
             pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
@@ -184,7 +184,7 @@ class MimicCXRDataset(ChestDataset):
 
 
 class ChestXR8Dataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/chestxray8_config.json', mode='train'):
+    def __init__(self, label_path, cfg='configs/chestxray8_config.json', mode='train', upsample=True):
         def get_labels(label_strs):
             all_labels = []
             for label in label_strs:
@@ -200,7 +200,7 @@ class ChestXR8Dataset(ChestDataset):
         label_path = csv_path + 'chestxray8_{}.csv'.format(mode)
         labels = pd.read_csv(label_path)
         labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
-        if self._mode == 'train':
+        if self._mode == 'train' and upsample:
             labels_neg = labels[labels['Finding Labels'].str.contains('No Finding')]
             labels_pos = labels[~labels['Finding Labels'].str.contains('No Finding')]
             upweight_ratio = len(labels_neg)/len(labels_pos)
@@ -214,7 +214,7 @@ class ChestXR8Dataset(ChestDataset):
 
 
 class PadChestDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/padchest_config.json', mode='train'):
+    def __init__(self, label_path, cfg='configs/padchest_config.json', mode='train', upsample=True):
         def get_labels(label_strs):
             all_labels = []
             for label in label_strs:
@@ -233,7 +233,7 @@ class PadChestDataset(ChestDataset):
             pd.notnull(labels['ViewPosition_DICOM']) & labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
         labels = labels[pd.notnull(labels['Labels']) & labels['Labels'].str.contains(
             '|'.join([d.lower() for d in diseases] + ['normal']))]
-        if self._mode == 'train':
+        if self._mode == 'train' and upsample:
             labels_neg = labels[labels['Labels'].str.contains('normal')]
             labels_pos = labels[~labels['Labels'].str.contains('normal')]
             upweight_ratio = len(labels_neg)/len(labels_pos)
@@ -263,13 +263,13 @@ class chestXR(MultipleDomainDataset):
             print(environment)
             path = os.path.join(root, environment)
             if environment == 'mimic-cxr':
-                env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv', mode=mode)
+                env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv', mode=mode, upsample=hparams['upsample'])
             elif environment == 'chexpert':
-                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train_sub.csv', mode=mode)
+                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train_sub.csv', mode=mode, upsample=hparams['upsample'])
             elif environment == 'chestxr8':
-                env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv', mode=mode)
+                env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv', mode=mode, upsample=hparams['upsample'])
             elif environment == 'padchest':
-                env_dataset = PadChestDataset(paths[i] + '/padchest_labels.csv', mode=mode)
+                env_dataset = PadChestDataset(paths[i] + '/padchest_labels.csv', mode=mode, upsample=hparams['upsample'])
             else:
                 raise Exception('Unknown environments')
             if mode != 'train':
