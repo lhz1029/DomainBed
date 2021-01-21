@@ -10,13 +10,14 @@ import json
 import os
 import sys
 from shutil import copyfile
+from tqdm import tqdm
 
 import numpy as np
 import torch
 import torch.nn as nn
-import tqdm
 from collections import Counter
 from pytorch_lightning.metrics.functional.classification import f1_score, auroc
+from pytorch_lightning.metrics.classification import F1
 
 def make_weights_for_balanced_classes(dataset):
     counts = Counter()
@@ -138,7 +139,25 @@ def accuracy(network, loader, weights, device, strict=False):
     return correct / total
 
 
-def get_metrics(network, loader, weights, device, name):
+def get_ece(ps, ys):
+    acc_mat = (ps.gt(.5) == ys).float()
+    eces = []
+    bin_weights_per_class = []
+    for i in np.arange(0, 1, .1):
+        if i == .9:
+            bin_idx = ps.ge(i) & ps.le(i + .1)
+        else:
+            bin_idx = ps.ge(i) & ps.lt(i + .1)
+        bin_count_per_class = bin_idx.sum(axis=0)
+        per_class_bin_acc = (acc_mat * bin_idx).sum(axis=0) / bin_count_per_class
+        per_class_bin_conf = (ps * bin_idx).sum(axis=0) / bin_count_per_class
+        bin_weights_per_class.append(bin_count_per_class / ps.shape[0])
+        eces.append(abs(per_class_bin_acc - per_class_bin_conf))
+    return (torch.stack(eces, axis=0) * torch.stack(bin_weights_per_class, axis=0)).nansum(axis=0)
+
+
+def get_metrics(network, loader, weights, device, name, mode='full'):
+    print('Start Evaluation')
     correct = 0
     strict_correct = 0
     total = 0
@@ -150,7 +169,11 @@ def get_metrics(network, loader, weights, device, name):
 
     network.eval()
     with torch.no_grad():
-        for x, y in loader:
+        t = tqdm(iter(loader), leave=False, total=len(loader))
+        for i, data in enumerate(t):
+            x, y = data
+            if mode=='skip' and i >= 100:
+                break
             x = x.to(device)
             y = y.to(device)
             p = sigmoid(network.predict(x))
@@ -168,18 +191,26 @@ def get_metrics(network, loader, weights, device, name):
             strict_total += batch_weights.sum().item()
         ps = torch.cat(ps).to(device)
         ys = torch.cat(ys).to(device)
-        micro_f1 = f1_score(ps.gt(.5).float(), ys, num_classes=None, class_reduction='micro')
-        macro_f1 = f1_score(ps.gt(.5).float(), ys, num_classes=None, class_reduction='macro')
+        eces = get_ece(ps, ys).item()
+        # micro_f1 = f1_score(ps.gt(.5).float(), ys, num_classes=None, class_reduction='micro').item()
+        # macro_f1 = f1_score(ps.gt(.5).float(), ys, num_classes=None, class_reduction='macro').item()
         aucs = []
+        micro_f1 = []
+        macro_f1 = []
         for d in range(ps.size(1)):
-            aucs.append(auroc(ps[:, d], ys[:, d]))
+            micro = F1(num_classes=2, average='micro')
+            macro = F1(num_classes=2, average='macro')
+            micro_f1.append(micro(ps[:, d].gt(.5).cpu().long(), ys[:, d].cpu().long()).item())
+            macro_f1.append(macro(ps[:, d].gt(.5).cpu().long(), ys[:, d].cpu().long()).item())
+            aucs.append(auroc(ps[:, d], ys[:, d]).item())
     network.train()
     results = {
         f'{name}_acc': correct / total,
         f'{name}_strict_acc': strict_correct / strict_total,
         f'{name}_auc': aucs,
         f'{name}_micro_f1': micro_f1,
-        f'{name}_macro_f1': macro_f1
+        f'{name}_macro_f1': macro_f1,
+        f'{name}_eces': eces
     }
     return results
 

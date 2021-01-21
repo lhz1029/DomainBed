@@ -8,6 +8,7 @@ import random
 import sys
 import time
 import uuid
+from tqdm import tqdm
 
 import numpy as np
 import PIL
@@ -20,6 +21,9 @@ from domainbed import hparams_registry
 from domainbed import algorithms
 from domainbed.lib import misc
 from domainbed.lib.fast_data_loader import InfiniteDataLoader, FastDataLoader
+
+from tensorboardX import SummaryWriter
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Domain generalization')
@@ -35,24 +39,25 @@ if __name__ == "__main__":
                              'random_hparams).')
     parser.add_argument('--seed', type=int, default=0,
                         help='Seed for everything else')
-    parser.add_argument('--steps', type=int, default=100000,
+    parser.add_argument('--steps', type=int, default=200000,
                         help='Number of steps. Default is dataset-dependent.')
     parser.add_argument('--checkpoint_freq', type=int, default=10000,
                         help='Checkpoint every N steps. Default is dataset-dependent.')
     parser.add_argument('--test_envs', type=int, nargs='+', default=[0])
     parser.add_argument('--output_dir', type=str, default="train_output")
-    parser.add_argument('--holdout_fraction', type=float, default=0.2)
+    parser.add_argument('--holdout_fraction', type=float, default=0.1)
     parser.add_argument('--skip_model_save', action='store_true')
     args = parser.parse_args()
 
     # If we ever want to implement checkpointing, just persist these values
     # every once in a while, and then load them from disk here.
-    start_step = 1
+    start_step = 0
     algorithm_dict = None
 
     os.makedirs(args.output_dir, exist_ok=True)
     sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out.txt'))
     sys.stderr = misc.Tee(os.path.join(args.output_dir, 'err.txt'))
+    writer = SummaryWriter(log_dir=args.output_dir)
 
     print("Environment:")
     print("\tPython: {}".format(sys.version.split(" ")[0]))
@@ -91,8 +96,10 @@ if __name__ == "__main__":
         device = "cpu"
 
     if args.dataset in vars(datasets):
-        dataset = vars(datasets)[args.dataset](args.data_dir,
-            args.test_envs, hparams)
+        train_dataset = vars(datasets)[args.dataset](args.data_dir,
+                                                     args.test_envs, 'train', hparams)
+        val_dataset = vars(datasets)[args.dataset](args.data_dir,
+                                                   args.test_envs, 'val', hparams)
     else:
         raise NotImplementedError
 
@@ -100,10 +107,8 @@ if __name__ == "__main__":
     # each in-split except the test envs, and evaluate on all splits.
     in_splits = []
     out_splits = []
-    for env_i, env in enumerate(dataset):
-        out, in_ = misc.split_dataset(env,
-            int(len(env)*args.holdout_fraction),
-            misc.seed_hash(args.trial_seed, env_i))
+    for env_i, env in enumerate(zip(val_dataset, train_dataset)):
+        out, in_ = env
         if hparams['class_balanced']:
             in_weights = misc.make_weights_for_balanced_classes(in_)
             out_weights = misc.make_weights_for_balanced_classes(out)
@@ -111,31 +116,35 @@ if __name__ == "__main__":
             in_weights, out_weights = None, None
         in_splits.append((in_, in_weights))
         out_splits.append((out, out_weights))
-
-    dataset.N_WORKERS = 1
-    hparams['batch_size'] = 8
+    hparams['batch_size'] = 24
+    hparams['weight_decay'] = 1e-6
     train_loaders = [InfiniteDataLoader(
         dataset=env,
         weights=env_weights,
         batch_size=hparams['batch_size'],
-        num_workers=dataset.N_WORKERS)
+        num_workers=train_dataset.N_WORKERS)
         for i, (env, env_weights) in enumerate(in_splits)
         if i not in args.test_envs]
-
     eval_loaders = [FastDataLoader(
         dataset=env,
-        batch_size=hparams['batch_size'],
-        num_workers=dataset.N_WORKERS)
-        for env, _ in (in_splits + out_splits)]
-    eval_weights = [None for _, weights in (in_splits + out_splits)]
-    eval_loader_names = ['env{}_in'.format(i)
-                         for i in range(len(in_splits))]
-    eval_loader_names += ['env{}_out'.format(i)
-                          for i in range(len(out_splits))]
+        batch_size=hparams['batch_size'] * 4,
+        num_workers=val_dataset.N_WORKERS)
+        for env, _ in (out_splits)]
+    eval_weights = [None for _, weights in (out_splits)]
+    eval_loader_names = ['env{}_out'.format(i)
+                         for i in range(len(out_splits))]
+    train_eval_loaders = [FastDataLoader(
+        dataset=env,
+        batch_size=hparams['batch_size'] * 4,
+        num_workers=train_dataset.N_WORKERS)
+        for env, _ in (in_splits)]
+    train_eval_weights = [None for _, weights in (in_splits)]
+    train_eval_loader_names = ['env{}_in'.format(i)
+                               for i in range(len(in_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
-    algorithm = algorithm_class(dataset.input_shape, dataset.num_classes,
-                                len(dataset) - len(args.test_envs), hparams)
+    algorithm = algorithm_class(train_dataset.input_shape, train_dataset.num_classes,
+                                len(train_dataset) - len(args.test_envs), hparams)
 
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)
@@ -145,17 +154,18 @@ if __name__ == "__main__":
     train_minibatches_iterator = zip(*train_loaders)
     checkpoint_vals = collections.defaultdict(lambda: [])
 
-    steps_per_epoch = min([len(env)/hparams['batch_size'] for env,_ in in_splits])
+    steps_per_epoch = min([len(env) / hparams['batch_size'] for env, _ in in_splits])
 
-    n_steps = args.steps or dataset.N_STEPS
-    checkpoint_freq = args.checkpoint_freq or dataset.CHECKPOINT_FREQ
+    n_steps = args.steps or train_dataset.N_STEPS
+    checkpoint_freq = args.checkpoint_freq or train_dataset.CHECKPOINT_FREQ
 
     last_results_keys = None
-    for step in range(start_step, n_steps):
+    for step in tqdm(range(start_step, n_steps)):
         step_start_time = time.time()
         minibatches_device = [(x.to(device), y.to(device))
-            for x,y in next(train_minibatches_iterator)]
+                              for x, y in next(train_minibatches_iterator)]
         step_vals = algorithm.update(minibatches_device)
+        writer.add_scalars(args.algorithm + '-' + str(args.test_envs), step_vals, step)
         checkpoint_vals['step_time'].append(time.time() - step_start_time)
 
         for key, val in step_vals.items():
@@ -174,31 +184,34 @@ if __name__ == "__main__":
             for name, loader, weights in evals:
                 metrics = misc.get_metrics(algorithm, loader, weights, device, name)
                 results.update(metrics)
-                # acc = misc.accuracy(algorithm, loader, weights, device, strict=False)
-                # results[name+'_acc'] = acc
-                # strict_acc = misc.accuracy(algorithm, loader, weights, device, strict=True)
-                # results[name+'_strict_acc'] = acc
-                # aurocs = misc.get_metric(algorithm, loader, weights, device, metric='auroc')
-                # for i, auroc in enumerate(aurocs):
-                #     results[name+f'_auroc{i}'] = auroc
-                # macro_f1 = misc.get_metric(algorithm, loader, weights, device, metric='macro_f1')
-                # results[name+'_macro_f1'] = macro_f1
-                # micro = misc.get_metric(algorithm, loader, weights, device, metric='micro_f1')
-                # results[name+'_micro_f1'] = micro
 
+            train_evals = zip(train_eval_loader_names, train_eval_loaders, train_eval_weights)
+            for name, loader, weights in train_evals:
+                metrics = misc.get_metrics(algorithm, loader, weights, device, name, mode='skip')
+                results.update(metrics)
 
+            # # for readability in the outfile, limit the number of columns
             results_keys = sorted(results.keys())
-            # for readability in the outfile, limit the number of columns
-            results_keys.remove([k for k in results_keys if '_acc' in k or 'f1' in k])
+            results_keys = [k for k in results_keys if '_acc' not in k and 'f1' not in k]
             if results_keys != last_results_keys:
                 misc.print_row(results_keys, colwidth=12)
                 last_results_keys = results_keys
             misc.print_row([results[key] for key in results_keys],
-                colwidth=12)
+                           colwidth=12)
+
+            tb_results = {}
+            for k, v in results.items():
+                if len(k.split('_', 2)) == 3:
+                    if isinstance(results[k], float):
+                        tb_results[k] = v
+                    else:
+                        for n in range(len(v)):
+                            tb_results[k + "_" + datasets.diseases[n]] = v[n]
+            writer.add_scalars(args.algorithm + '-' + str(args.test_envs), tb_results, results['step'])
 
             results.update({
                 'hparams': hparams,
-                'args': vars(args)    
+                'args': vars(args)
             })
 
             epochs_path = os.path.join(args.output_dir, 'results.jsonl')
@@ -209,17 +222,17 @@ if __name__ == "__main__":
             start_step = step + 1
             checkpoint_vals = collections.defaultdict(lambda: [])
 
-    if not args.skip_model_save:
-        save_dict = {
-            "args": vars(args),
-            "model_input_shape": dataset.input_shape,
-            "model_num_classes": dataset.num_classes,
-            "model_num_domains": len(dataset) - len(args.test_envs),
-            "model_hparams": hparams,
-            "model_dict": algorithm.cpu().state_dict()
-        }
+            if not args.skip_model_save:
+                save_dict = {
+                    "args": vars(args),
+                    "model_input_shape": train_dataset.input_shape,
+                    "model_num_classes": train_dataset.num_classes,
+                    "model_num_domains": len(train_dataset) - len(args.test_envs),
+                    "model_hparams": hparams,
+                    "model_dict": algorithm.cpu().state_dict()
+                }
 
-        torch.save(save_dict, os.path.join(args.output_dir, "model.pkl"))
-
+                torch.save(save_dict, os.path.join(args.output_dir, "model_{}.pkl".format(step)))
+                algorithm.to(device)
     with open(os.path.join(args.output_dir, 'done'), 'w') as f:
         f.write('done')

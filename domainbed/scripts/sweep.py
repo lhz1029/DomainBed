@@ -90,6 +90,7 @@ def all_test_env_combinations(n):
     envs."""
     assert(n >= 3)
     for i in range(n):
+        # yield [e for e in range(n) if e != i]
         yield [i]
         # for j in range(i+1, n):
             # yield [i, j]
@@ -103,7 +104,7 @@ def make_args_list(n_trials, dataset_names, algorithms, n_hparams, steps,
                 all_test_envs = all_test_env_combinations(
                     datasets.num_environments(dataset))
                 for test_envs in all_test_envs:
-                    for hparams_seed in range(n_hparams):
+                    for hparams_seed in range(1, n_hparams + 1):
                         train_args = {}
                         train_args['dataset'] = dataset
                         train_args['algorithm'] = algorithm

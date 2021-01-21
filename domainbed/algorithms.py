@@ -131,6 +131,10 @@ class AbstractDANN(Algorithm):
         self.classifier = nn.Linear(self.featurizer.n_outputs, num_classes)
         self.discriminator = networks.MLP(self.featurizer.n_outputs,
             num_domains, self.hparams)
+        
+        # account for the binary classification case
+        if num_classes == 1:
+            num_classes += 1
         self.class_embeddings = nn.Embedding(num_classes,
             self.featurizer.n_outputs)
 
@@ -170,9 +174,11 @@ class AbstractDANN(Algorithm):
         ])
 
         if self.class_balance:
+            # TODO: doesn't work
             y_counts = F.one_hot(all_y[:, 0].long()).sum(dim=0)
-            weights = 1. / (y_counts[all_y[:, 0].bool()] * y_counts.shape[0]).float()
-            disc_loss = nn.CrossEntropyLoss()(disc_out, disc_labels, reduction='none')
+            weights = 1. / (y_counts[all_y.bool()] * y_counts.shape[0]).float()
+
+            disc_loss = nn.CrossEntropyLoss(reduction='none')(disc_out, disc_labels)
             disc_loss = (weights * disc_loss).sum()
         else:
             disc_loss = nn.CrossEntropyLoss()(disc_out, disc_labels)
@@ -215,7 +221,7 @@ class CDANN(AbstractDANN):
     """Conditional DANN"""
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(CDANN, self).__init__(input_shape, num_classes, num_domains,
-            hparams, conditional=True, class_balance=True)
+            hparams, conditional=True, class_balance=False)  # TODO: class_balance=True in original
 
 
 class IRM(ERM):

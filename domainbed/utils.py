@@ -44,13 +44,13 @@ def fix_ratio(image, cfg):
 
 def transform(image, cfg):
     assert image.ndim == 2, "image must be gray image"
-    if cfg.use_equalizeHist:
-        image = cv2.equalizeHist(image)
+    # if cfg.use_equalizeHist:
+    #    image = cv2.equalizeHist(image)
 
-    if cfg.gaussian_blur > 0:
-        image = cv2.GaussianBlur(
-            image,
-            (cfg.gaussian_blur, cfg.gaussian_blur), 0)
+    # if cfg.gaussian_blur > 0:
+    #     image = cv2.GaussianBlur(
+    #         image,
+    #         (cfg.gaussian_blur, cfg.gaussian_blur), 0)
 
     image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
