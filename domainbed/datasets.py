@@ -104,7 +104,7 @@ class CheXpertDataset(ChestDataset):
                 image_path = self._data_path + '/' + fields[0]
                 for index, value in enumerate(fields[5:]):
                     if index == 5 or index == 8:
-                labels.append(self.dict[1].get(value))
+                        labels.append(self.dict[1].get(value))
                     elif index == 2 or index == 6 or index == 7:
                         labels.append(self.dict[0].get(value))
                 labels = np.array(list(map(int, labels)))[np.argsort(self._label_header)]
