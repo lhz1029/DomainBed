@@ -162,7 +162,7 @@ class MimicCXRDataset(ChestDataset):
             mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
         else:
             mask = (df[diseases + ['No Finding']] == 1).any(1)
-        labels = df[mask & (df['dicom_id'] != '')]
+        labels = df[mask & pd.notnull(df['dicom_id'])]
         labels.fillna(0, inplace=True)
         self._labels = get_labels(labels)
         self._image_paths = get_image_paths(labels)
