@@ -54,10 +54,10 @@ class ResNet(torch.nn.Module):
     def __init__(self, input_shape, hparams):
         super(ResNet, self).__init__()
         if hparams['resnet18']:
-            self.network = torchvision.models.resnet18(pretrained=False)
+            self.network = torchvision.models.resnet18(pretrained=hparams['pretrained'])
             self.n_outputs = 512
         else:
-            self.network = torchvision.models.resnet50(pretrained=False)
+            self.network = torchvision.models.resnet50(pretrained=hparams['pretrained'])
             self.n_outputs = 2048
 
         # adapt number of channels

@@ -79,6 +79,11 @@ if __name__ == "__main__":
             misc.seed_hash(args.hparams_seed, args.trial_seed))
     if args.hparams:
         hparams.update(json.loads(args.hparams))
+    hparams['lambda'] = 0.1
+    hparams['d_steps_per_g_step'] = 1
+    hparams['mlp_width'] = 512
+    hparams['mlp_depth'] = 2
+    hparams['pretrained'] = False
 
     print('HParams:')
     for k, v in sorted(hparams.items()):
@@ -143,6 +148,38 @@ if __name__ == "__main__":
                                for i in range(len(in_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
+    algorithm = algorithm_class(train_dataset.input_shape, train_dataset.num_classes,
+                                len(train_dataset) - len(args.test_envs), hparams)
+
+    if algorithm_dict is not None:
+        algorithm.load_state_dict(algorithm_dict)
+
+    algorithm.to(device)
+
+    train_minibatches_iterator = zip(*train_loaders)
+    checkpoint_vals = collections.defaultdict(lambda: [])
+
+    steps_per_epoch = min([len(env) / hparams['batch_size'] for env, _ in in_splits])
+
+
+    algorithm_class = algorithms.get_algorithm_class(args.algorithm)
+
+    if args.tsne:
+        hparams['pretrained'] = True
+        algorithm = algorithm_class(train_dataset.input_shape, 1000,
+                            len(train_dataset) - len(args.test_envs), hparams)
+        algorithm.eval()
+        all_embeddings = []
+        for i, loader in enumerate(eval_loaders):
+            embeddings = []
+            labels = []
+            for _, (x, y) in zip(range(15), loader):
+                x = x.to(device)
+                embeddings.append(algorithm.featurizer(x).detach().cpu().numpy())
+                labels.append(y.detach().cpu().numpy())
+            np.save(os.path.join(args.output_dir, f'embeddings {i}.npy'), embeddings)
+            np.save(os.path.join(args.output_dir, f'labels {i}.npy'), labels)
+        import sys; sys.exit()
     algorithm = algorithm_class(train_dataset.input_shape, train_dataset.num_classes,
                                 len(train_dataset) - len(args.test_envs), hparams)
 
