@@ -47,6 +47,7 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', type=str, default="train_output")
     parser.add_argument('--holdout_fraction', type=float, default=0.1)
     parser.add_argument('--skip_model_save', action='store_true')
+    parser.add_argument('--tsne', action='store_true')
     args = parser.parse_args()
 
     # If we ever want to implement checkpointing, just persist these values
@@ -58,6 +59,7 @@ if __name__ == "__main__":
     sys.stdout = misc.Tee(os.path.join(args.output_dir, 'out.txt'))
     sys.stderr = misc.Tee(os.path.join(args.output_dir, 'err.txt'))
     writer = SummaryWriter(log_dir=args.output_dir)
+
 
     print("Environment:")
     print("\tPython: {}".format(sys.version.split(" ")[0]))
@@ -79,13 +81,7 @@ if __name__ == "__main__":
             misc.seed_hash(args.hparams_seed, args.trial_seed))
     if args.hparams:
         hparams.update(json.loads(args.hparams))
-    hparams['lambda'] = 0.1
-    hparams['d_steps_per_g_step'] = 1
-    hparams['mlp_width'] = 512
-    hparams['mlp_depth'] = 2
     hparams['pretrained'] = False
-    hparams['subset'] = False
-
     print('HParams:')
     for k, v in sorted(hparams.items()):
         print('\t{}: {}'.format(k, v))
@@ -124,6 +120,10 @@ if __name__ == "__main__":
         out_splits.append((out, out_weights))
     hparams['batch_size'] = 24
     hparams['weight_decay'] = 1e-6
+    hparams['lambda'] = 0.1
+    hparams['d_steps_per_g_step'] = 1
+    hparams['mlp_width'] = 512
+    hparams['mlp_depth'] = 2
     train_loaders = [InfiniteDataLoader(
         dataset=env,
         weights=env_weights,
@@ -149,22 +149,7 @@ if __name__ == "__main__":
                                for i in range(len(in_splits))]
 
     algorithm_class = algorithms.get_algorithm_class(args.algorithm)
-    algorithm = algorithm_class(train_dataset.input_shape, train_dataset.num_classes,
-                                len(train_dataset) - len(args.test_envs), hparams)
-
-    if algorithm_dict is not None:
-        algorithm.load_state_dict(algorithm_dict)
-
-    algorithm.to(device)
-
-    train_minibatches_iterator = zip(*train_loaders)
-    checkpoint_vals = collections.defaultdict(lambda: [])
-
-    steps_per_epoch = min([len(env) / hparams['batch_size'] for env, _ in in_splits])
-
-
-    algorithm_class = algorithms.get_algorithm_class(args.algorithm)
-
+    
     if args.tsne:
         hparams['pretrained'] = True
         algorithm = algorithm_class(train_dataset.input_shape, 1000,
@@ -182,7 +167,7 @@ if __name__ == "__main__":
             np.save(os.path.join(args.output_dir, f'labels {i}.npy'), labels)
         import sys; sys.exit()
     algorithm = algorithm_class(train_dataset.input_shape, train_dataset.num_classes,
-                                len(train_dataset) - len(args.test_envs), hparams)
+                                len(train_dataset) - len(args.test_envs), hparams)    
 
     if algorithm_dict is not None:
         algorithm.load_state_dict(algorithm_dict)

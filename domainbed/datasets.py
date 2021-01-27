@@ -78,7 +78,7 @@ class ChestDataset(Dataset):
 
 
 class CheXpertDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/chexpert_config.json', mode='train', upsample=True):
+    def __init__(self, label_path, cfg='configs/chexpert_config.json', mode='train', upsample=True, subset=True):
         def get_labels(labels):
             all_labels = []
             for _, row in labels.iterrows():
@@ -102,12 +102,15 @@ class CheXpertDataset(ChestDataset):
         df = pd.read_csv(labels_path)
         # subsetting the data
         # TODO: validation at some point should not be subsetted
-        uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
-        if uncertain_diseases:
-            mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+        if subset:
+            uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
+            if uncertain_diseases:
+                mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+            else:
+                mask = (df[diseases + ['No Finding']] == 1).any(1)
+            labels = df[mask]
         else:
-            mask = (df[diseases + ['No Finding']] == 1).any(1)
-        labels = df[mask]
+            labels = df
         labels.fillna(0, inplace=True)
         self._labels = get_labels(labels)
         self._image_paths = get_image_paths(labels)
@@ -127,7 +130,7 @@ class CheXpertDataset(ChestDataset):
 
 
 class MimicCXRDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/mimic_config.json', mode='train', upsample=True):
+    def __init__(self, label_path, cfg='configs/mimic_config.json', mode='train', upsample=True, subset=True):
         def get_labels(labels):
             all_labels = []
             for _, row in labels.iterrows():
@@ -157,12 +160,16 @@ class MimicCXRDataset(ChestDataset):
         df = pd.read_csv(label_path)
         # subsetting the data
         # TODO: validation at some point should not be subsetted
-        uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
-        if uncertain_diseases:
-            mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+        if subset:
+            uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
+            if uncertain_diseases:
+                mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+            else:
+                mask = (df[diseases + ['No Finding']] == 1).any(1)
+            labels = df[mask]
         else:
-            mask = (df[diseases + ['No Finding']] == 1).any(1)
-        labels = df[mask & pd.notnull(df['dicom_id'])]
+            labels = df
+        labels = labels[pd.notnull(labels['dicom_id'])]
         labels.fillna(0, inplace=True)
         self._labels = get_labels(labels)
         self._image_paths = get_image_paths(labels)
@@ -182,7 +189,7 @@ class MimicCXRDataset(ChestDataset):
 
 
 class ChestXR8Dataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/chestxray8_config.json', mode='train', upsample=True):
+    def __init__(self, label_path, cfg='configs/chestxray8_config.json', mode='train', upsample=True, subset=True):
         def get_labels(label_strs):
             all_labels = []
             for label in label_strs:
@@ -197,7 +204,8 @@ class ChestXR8Dataset(ChestDataset):
             self.cfg = edict(json.load(f))
         label_path = csv_path + 'chestxray8_{}.csv'.format(mode)
         labels = pd.read_csv(label_path)
-        labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
+        if subset:
+            labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
         if self._mode == 'train' and upsample:
             labels_neg = labels[labels['Finding Labels'].str.contains('No Finding')]
             labels_pos = labels[~labels['Finding Labels'].str.contains('No Finding')]
@@ -212,7 +220,7 @@ class ChestXR8Dataset(ChestDataset):
 
 
 class PadChestDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/padchest_config.json', mode='train', upsample=True):
+    def __init__(self, label_path, cfg='configs/padchest_config.json', mode='train', upsample=True, subset=True):
         def get_labels(label_strs):
             all_labels = []
             for label in label_strs:
@@ -229,8 +237,10 @@ class PadChestDataset(ChestDataset):
         positions = ['AP', 'PA', 'ANTEROPOSTERIOR', 'POSTEROANTERIOR']
         labels = labels[
             pd.notnull(labels['ViewPosition_DICOM']) & labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
-        labels = labels[pd.notnull(labels['Labels']) & labels['Labels'].str.contains(
-            '|'.join([d.lower() for d in diseases] + ['normal']))]
+        if subset:
+            labels = labels[labels['Labels'].str.contains(
+                '|'.join([d.lower() for d in diseases] + ['normal']))]
+        labels = labels[pd.notnull(labels['Labels'])]
         if self._mode == 'train' and upsample:
             labels_neg = labels[labels['Labels'].str.contains('normal')]
             labels_pos = labels[~labels['Labels'].str.contains('normal')]
@@ -261,13 +271,13 @@ class chestXR(MultipleDomainDataset):
             print(environment)
             path = os.path.join(root, environment)
             if environment == 'mimic-cxr':
-                env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv', mode=mode, upsample=hparams['upsample'])
+                env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             elif environment == 'chexpert':
-                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train_sub.csv', mode=mode, upsample=hparams['upsample'])
+                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train_sub.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             elif environment == 'chestxr8':
-                env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv', mode=mode, upsample=hparams['upsample'])
+                env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             elif environment == 'padchest':
-                env_dataset = PadChestDataset(paths[i] + '/padchest_labels.csv', mode=mode, upsample=hparams['upsample'])
+                env_dataset = PadChestDataset(paths[i] + '/padchest_labels.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             else:
                 raise Exception('Unknown environments')
             if mode != 'train':
