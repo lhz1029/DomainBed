@@ -58,16 +58,17 @@ class ChestDataset(Dataset):
 
     def __getitem__(self, idx):
         image = cv2.imread(self._image_paths[idx], 0)
-        try:
-            image = Image.fromarray(image)
-        except:
-            raise Exception('None image path: {}'.format(self._image_paths[idx]))
+        image = transform(image, self.cfg)
+        image = Image.fromarray(image)
+        # try:
+        #     image = Image.fromarray(image)
+        # except:
+        #     raise Exception('None image path: {}'.format(self._image_paths[idx]))
         if self._mode == 'train':
             image = GetTransforms(image, type=self.cfg.use_transforms_type)
-        image = np.array(image)
-        image = transform(image, self.cfg)
+        to_tensor = transforms.ToTensor()
+        image = to_tensor(image)
         labels = np.array([self._labels[idx][-1]]).astype(np.float32)
-
         path = self._image_paths[idx]
         if self._mode == 'train' or self._mode == 'val' or self._mode == 'test':
             return (image, labels)
@@ -207,11 +208,15 @@ class ChestXR8Dataset(ChestDataset):
         if subset:
             labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
         if self._mode == 'train' and upsample:
-            labels_neg = labels[labels['Finding Labels'].str.contains('No Finding')]
-            labels_pos = labels[~labels['Finding Labels'].str.contains('No Finding')]
-            upweight_ratio = len(labels_neg)/len(labels_pos)
-            labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
-            labels = pd.concat([labels_neg, labels_pos])
+            # labels_neg = labels[labels['Finding Labels'].str.contains('No Finding')]
+            # labels_pos = labels[~labels['Finding Labels'].str.contains('No Finding')]
+            # one vs all
+            labels_pos = labels[labels['Finding Labels'].str.contains(diseases[0])]
+            labels_neg = labels[~labels['Finding Labels'].str.contains(diseases[0])]
+            upweight_ratio = len(labels_neg)//len(labels_pos)
+            if upweight_ratio > 0:
+                labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
+                labels = pd.concat([labels_neg, labels_pos])
         self._image_paths = [os.path.join(self._data_path, 'images', name) for name in labels['Image Index'].values]
         self._labels = get_labels(labels['Finding Labels'].values)
         self._num_image = len(self._image_paths)
@@ -237,16 +242,21 @@ class PadChestDataset(ChestDataset):
         positions = ['AP', 'PA', 'ANTEROPOSTERIOR', 'POSTEROANTERIOR']
         labels = labels[
             pd.notnull(labels['ViewPosition_DICOM']) & labels['ViewPosition_DICOM'].str.match('|'.join(positions))]
+        labels = labels[pd.notnull(labels['Labels'])]
         if subset:
             labels = labels[labels['Labels'].str.contains(
                 '|'.join([d.lower() for d in diseases] + ['normal']))]
-        labels = labels[pd.notnull(labels['Labels'])]
+
         if self._mode == 'train' and upsample:
-            labels_neg = labels[labels['Labels'].str.contains('normal')]
-            labels_pos = labels[~labels['Labels'].str.contains('normal')]
-            upweight_ratio = len(labels_neg)/len(labels_pos)
-            labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
-            labels = pd.concat([labels_neg, labels_pos])
+            # labels_neg = labels[labels['Labels'].str.contains('normal')]
+            # labels_pos = labels[~labels['Labels'].str.contains('normal')]
+            # one vs all
+            labels_pos = labels[labels['Labels'].str.contains(diseases[0].lower())]
+            labels_neg = labels[~labels['Labels'].str.contains(diseases[0].lower())]
+            upweight_ratio = len(labels_neg)//len(labels_pos)
+            if upweight_ratio > 0:
+                labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
+                labels = pd.concat([labels_neg, labels_pos])
         self._image_paths = [os.path.join(self._data_path, name) for name in labels['ImageID'].values]
         self._labels = get_labels(labels['Labels'].values)
         self._num_image = len(self._image_paths)
@@ -258,7 +268,7 @@ class chestXR(MultipleDomainDataset):
     ENVIRONMENTS = ['mimic-cxr', 'chexpert', 'chestxr8', 'padchest']
     N_STEPS = 100000  # Default, subclasses may override
     CHECKPOINT_FREQ = 5000  # Default, subclasses may override
-    N_WORKERS = 4
+    N_WORKERS = 8
     def __init__(self, root, test_envs, mode, hparams):
         super().__init__()
         # paths = ['/beegfs/wz727/mimic-cxr',
