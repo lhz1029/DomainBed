@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 
+from os.path import dirname, abspath
 import os
 import torch
 from easydict import EasyDict as edict
@@ -31,12 +32,18 @@ DATASETS = [
     "TerraIncognita",
     "DomainNet",
     "SVIRO",
-    'chestXR'
+    'chestXR',
+    'JointDataset'
 ]
 
-all_diseases = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pneumonia']
+all_diseases = ['Atelectasis', 'Cardiomegaly',
+                'Consolidation', 'Edema', 'Pneumonia']
 diseases = ['Pneumonia']
 csv_path = '/scratch/wz727/chestXR/data/labels/'
+
+domainbed_path = dirname(dirname(abspath(__file__)))
+print('In folder = {}'.format(domainbed_path))
+
 
 class MultipleDomainDataset:
     N_STEPS = 5001  # Default, subclasses may override
@@ -58,17 +65,20 @@ class ChestDataset(Dataset):
 
     def __getitem__(self, idx):
         image = cv2.imread(self._image_paths[idx], 0)
-        image = transform(image, self.cfg)
+        # print(self._image_paths[idx])
         image = Image.fromarray(image)
+        # image = transform(image.transpose((2, 0, 1)), self.cfg)
         # try:
         #     image = Image.fromarray(image)
         # except:
         #     raise Exception('None image path: {}'.format(self._image_paths[idx]))
-        if self._mode == 'train':
-            image = GetTransforms(image, type=self.cfg.use_transforms_type)
+        resize = transforms.Resize((256, 256))
         to_tensor = transforms.ToTensor()
-        image = to_tensor(image)
-        labels = np.array([self._labels[idx][-1]]).astype(np.float32)
+        image = to_tensor(resize(image))
+        if self._mode == 'train':
+            image = GetTransforms(image, type="Aug")
+        # print(idx, type(idx))
+        labels = np.array([self._labels[idx]]).astype(np.float32)
         path = self._image_paths[idx]
         if self._mode == 'train' or self._mode == 'val' or self._mode == 'test':
             return (image, labels)
@@ -77,9 +87,169 @@ class ChestDataset(Dataset):
         else:
             raise Exception('Unknown mode : {}'.format(self._mode))
 
+    def upsample(self):
+        # if self._mode == 'train' and upsample:
+        ratio = (len(self._labels) - self._labels.sum(axis=0)
+                 ) // self._labels.sum(axis=0) - 1
+        ratio = ratio[self._idx][0]
+        pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
+        if ratio >= 1:
+            up_idx = np.concatenate(
+                (np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
+            self._image_paths = self._image_paths[up_idx]
+            self._labels = self._labels[up_idx]
+
+
+class JointDataset(MultipleDomainDataset):
+    # def __init__(self, data_path=None, mode='train', upsample=True, subset=True):
+    #     label_paths={
+    #         'mimic':"/scratch/wz727/chestXR/data/mimic-cxr/train_sub.csv",
+    #         'chexpert":"/CheXpert-v1.0/train.csv"
+    #     }
+    #     datasets = {}
+    #     cfg = 'configs/chexpert_config.json'
+    #     with open(cfg) as f:
+    #         self.cfg = edict(json.load(f))
+    #     for key, path in label_paths:
+    #         if key=='mimic':
+    #             datasets['mimic'] = MimicCXRDataset(path)
+    #         elif key=='chexpert'
+    #             datasets['chexpert'] = CheXpertDataset(path)
+    #         else:
+    #             assert False, 'Unrecognized dataset'
+    #     self._mode = mode
+    #     for key in datasets.keys():
+    #         self._labels.extend(datasets[key]._labels)
+    #         self._image_paths.extend(datasets[key]._image_paths)
+    # class chestXR(MultipleDomainDataset):
+    ENVIRONMENTS = ['mimic-cxr', 'chexpert']
+    N_STEPS = 100000  # Default, subclasses may override
+    CHECKPOINT_FREQ = 5000  # Default, subclasses may override
+    N_WORKERS = 8
+
+    def __init__(self, root, test_envs, mode, hparams):
+        super().__init__()
+        #     label_paths={
+        #         'mimic':"/scratch/wz727/chestXR/data/mimic-cxr/train_sub.csv",
+        #         'chexpert":"/CheXpert-v1.0/train.csv"
+        #     }
+        # paths = ['/beegfs/wz727/mimic-cxr',
+        #          '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
+        #          '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
+        #          '/scratch/lhz209/padchest']
+        # paths = ['/scratch/wz727/chestXR/data/mimic-cxr', '', '/chestxray8', '/padchest']
+        print('CALLING MIMIC')
+        mimic = MimicCXRDataset("/scratch/wz727/chestXR/data/mimic-cxr/train_sub.csv",
+                                mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
+
+        print('CALLING CHEXPERT')
+        chexpert = CheXpertDataset('/CheXpert-v1.0/train_sub.csv', mode=mode,
+                                   upsample=hparams['upsample'], subset=hparams['subset'])
+
+        # TODO: setup ability to call other datasets
+
+        chexpert_x = chexpert._image_paths
+        chexpert_y = chexpert._labels.ravel().astype(np.int)
+
+        mimic_x = mimic._image_paths
+        mimic_y = mimic._labels.ravel().astype(np.int)
+
+        # get counts
+        print('GETTING COUNTS')
+        mimic_count = np.sum(mimic_y)
+        chexpert_count = np.sum(chexpert_y)
+        print('Datasets original Y means {}, {}'.format(
+            mimic_y.mean(), chexpert_y.mean()))
+        mimic_healthy_count = mimic_y.shape[0] - mimic_count
+        chexpert_healthy_count = chexpert_y.shape[0] - chexpert_count
+
+        # find disease case indices
+        mimic_disease_indices = np.arange(mimic_y.shape[0])[mimic_y > 0]
+        chexpert_disease_indices = np.arange(
+            chexpert_y.shape[0])[chexpert_y > 0]
+
+        # find healthy case indices
+        mimic_healthy_indices = np.arange(mimic_y.shape[0])[mimic_y == 0]
+        chexpert_healthy_indices = np.arange(
+            chexpert_y.shape[0])[chexpert_y == 0]
+        
+        def _sample_with_prevalence_diffs(indices_a, indices_b, hold=0.9, rho=0.9):
+            indices_a_keep_count = int(hold*len(indices_a))
+            total_count = int(indices_a_keep_count/rho)
+            indices_b_keep_count = total_count - indices_a_keep_count
+            if indices_b_keep_count >= len(indices_b):
+                _b, _a = _sample_with_prevalence_diffs(indices_b, indices_a, hold, 1-rho)
+                print('FLIPPING')
+                return _a, _b
+
+            return np.random.choice(indices_a, indices_a_keep_count), np.random.choice(indices_b, indices_b_keep_count)
+
+        # CONSTRUCT THE TRAIN DISTRIBUTION
+        print('SET TRAIN PREVALENCE')
+        mimic_healthy_train, chexpert_healthy_train = _sample_with_prevalence_diffs(
+            mimic_healthy_indices, chexpert_healthy_indices, rho=0.1)
+
+        mimic_disease_train, chexpert_disease_train = _sample_with_prevalence_diffs(
+            mimic_disease_indices, chexpert_disease_indices, rho=0.9)
+
+        mimic_train = np.concatenate((mimic_healthy_train, mimic_disease_train))
+        chexpert_train = np.concatenate((chexpert_healthy_train, chexpert_disease_train))
+
+        # GET SAMPLES NOT IN THE TRAIN DISTRIBUTION
+        mimic_healthy_remain = np.setdiff1d(mimic_healthy_indices, mimic_healthy_train)
+        chexpert_healthy_remain = np.setdiff1d(chexpert_healthy_indices, chexpert_healthy_train)
+
+        mimic_disease_remain = np.setdiff1d(mimic_disease_indices, mimic_disease_train)
+        chexpert_disease_remain = np.setdiff1d(chexpert_disease_indices, chexpert_disease_train)
+
+        # CONSTRUCT THE TEST DISTRIBUTION
+        print('SET TEST PREVALENCE')
+        mimic_healthy_test, chexpert_healthy_test = _sample_with_prevalence_diffs(
+            mimic_healthy_remain, chexpert_healthy_remain, rho=0.9)
+
+        mimic_disease_test, chexpert_disease_test = _sample_with_prevalence_diffs(
+            mimic_disease_remain, chexpert_disease_remain, rho=0.1)
+
+        mimic_test = np.concatenate((mimic_healthy_test, mimic_disease_test))
+        chexpert_test = np.concatenate((chexpert_healthy_test, chexpert_disease_test))
+
+        # config creation
+        chexpert_cfgstr = domainbed_path + '/configs/chexpert_config.json'
+        with open(chexpert_cfgstr) as f:
+            chexpert_cfg = edict(json.load(f))
+
+        mimic_cfgstr = domainbed_path + '/configs/mimic_config.json'
+        with open(mimic_cfgstr) as f:
+            mimic_cfg = edict(json.load(f))
+
+        cxr_train = ChestDataset()
+        cxr_train._image_paths = np.concatenate( (mimic_x[mimic_train], chexpert_x[chexpert_train]))
+        cxr_train._labels = np.concatenate( (mimic_y[mimic_train], chexpert_y[chexpert_train])).reshape(-1, 1)
+        cxr_train._idx = np.array([diseases.index(d) for d in diseases])
+        cxr_train.upsample()
+        cxr_train.cfg = mimic_cfg
+        cxr_train._num_image = len(cxr_train._labels)
+        cxr_train._mode = mode
+
+        cxr_test = ChestDataset()
+        cxr_test._image_paths = np.concatenate( (mimic_x[mimic_test], chexpert_x[chexpert_test]))
+        cxr_test._labels = np.concatenate( (mimic_y[mimic_test], chexpert_y[chexpert_test])).reshape(-1, 1) 
+        cxr_test._idx = np.array([diseases.index(d) for d in diseases])
+        cxr_test.upsample()
+        cxr_test.cfg = mimic_cfg
+        cxr_test._num_image = len(cxr_test._labels)
+        cxr_test._mode = mode
+
+        self.datasets = [cxr_train, cxr_test]
+        print('Datasets generated with Y means {}, {}'.format( cxr_train._labels.mean(), cxr_test._labels.mean()))
+        print('Datasets generated with Y shapes {}, {}'.format( cxr_train._labels.shape, cxr_test._labels.shape))
+
+        self.input_shape = (1, 256, 256,)
+        self.num_classes = 1
+
 
 class CheXpertDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/chexpert_config.json', mode='train', upsample=True, subset=True):
+    def __init__(self, label_path, cfg=domainbed_path + '/configs/chexpert_config.json', mode='train', upsample=True, subset=True):
         def get_labels(labels):
             all_labels = []
             for _, row in labels.iterrows():
@@ -104,9 +274,11 @@ class CheXpertDataset(ChestDataset):
         # subsetting the data
         # TODO: validation at some point should not be subsetted
         if subset:
-            uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
+            uncertain_diseases = [
+                d for d in diseases if d in ['Atelectasis', 'Edema']]
             if uncertain_diseases:
-                mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+                mask = (df[diseases + ['No Finding']] ==
+                        1).any(1) | (df[uncertain_diseases] == -1).any(1)
             else:
                 mask = (df[diseases + ['No Finding']] == 1).any(1)
             labels = df[mask]
@@ -119,25 +291,30 @@ class CheXpertDataset(ChestDataset):
         self._image_paths = np.array(self._image_paths)
         self._labels = np.array(self._labels)
         if self._mode == 'train' and upsample:
-            ratio = (len(self._labels) - self._labels.sum(axis=0)) // self._labels.sum(axis=0) - 1
+            ratio = (len(self._labels) - self._labels.sum(axis=0)
+                     ) // self._labels.sum(axis=0) - 1
             ratio = ratio[self._idx][0]
+            print('IDX THING HAPPENING')
             pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
             if ratio >= 1:
-                up_idx = np.concatenate((np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
+                up_idx = np.concatenate(
+                    (np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
                 self._image_paths = self._image_paths[up_idx]
                 self._labels = self._labels[up_idx]
         self._labels = self._labels[:, self._idx]
         self._num_image = len(self._image_paths)
+        print('CONSTRUCTED CHEXPERT DATA WITH LABEL MEAN {}/ SHAPE {}'.format(
+            self._labels.ravel().mean(), self._labels.shape))
 
 
 class MimicCXRDataset(ChestDataset):
-    def __init__(self, label_path, cfg='configs/mimic_config.json', mode='train', upsample=True, subset=True):
+    def __init__(self, label_path, cfg=domainbed_path+'/configs/mimic_config.json', mode='train', upsample=True, subset=True):
         def get_labels(labels):
             all_labels = []
             for _, row in labels.iterrows():
                 all_labels.append([row[d] in [1, -1] for d in diseases])
             return all_labels
-        
+
         def get_image_paths(labels):
             all_paths = []
             for _, row in labels.iterrows():
@@ -146,8 +323,9 @@ class MimicCXRDataset(ChestDataset):
                 else:
                     data_path = '/mimic-cxr_2'
                 all_paths.append(
-                    data_path + '/p' + str(row['subject_id'])[:2] + '/p' + str(row['subject_id']) + \
-                    '/s' + str(row['study_id']) + '/' + str(row['dicom_id']) + '.jpg'
+                    data_path + '/p' + str(row['subject_id'])[:2] + '/p' + str(row['subject_id']) +
+                    '/s' + str(row['study_id']) + '/' +
+                    str(row['dicom_id']) + '.jpg'
                 )
             return all_paths
 
@@ -162,9 +340,11 @@ class MimicCXRDataset(ChestDataset):
         # subsetting the data
         # TODO: validation at some point should not be subsetted
         if subset:
-            uncertain_diseases = [d for d in diseases if d in ['Atelectasis', 'Edema']]
+            uncertain_diseases = [
+                d for d in diseases if d in ['Atelectasis', 'Edema']]
             if uncertain_diseases:
-                mask = (df[diseases + ['No Finding']] == 1).any(1) | (df[uncertain_diseases] == -1).any(1)
+                mask = (df[diseases + ['No Finding']] ==
+                        1).any(1) | (df[uncertain_diseases] == -1).any(1)
             else:
                 mask = (df[diseases + ['No Finding']] == 1).any(1)
             labels = df[mask]
@@ -178,15 +358,19 @@ class MimicCXRDataset(ChestDataset):
         self._image_paths = np.array(self._image_paths)
         self._labels = np.array(self._labels)
         if self._mode == 'train' and upsample:
-            ratio = (len(self._labels) - self._labels.sum(axis=0)) // self._labels.sum(axis=0) - 1
+            ratio = (len(self._labels) - self._labels.sum(axis=0)
+                     ) // self._labels.sum(axis=0) - 1
             ratio = ratio[self._idx][0]
             pos_idx = np.where(self._labels[:, self._idx] == 1)[0]
             if ratio >= 1:
-                up_idx = np.concatenate((np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
+                up_idx = np.concatenate(
+                    (np.arange(len(self._labels)), np.repeat(pos_idx, ratio)))
                 self._image_paths = self._image_paths[up_idx]
                 self._labels = self._labels[up_idx]
         # self._labels = self._labels[:, self._idx]
         self._num_image = len(self._image_paths)
+        print('CONSTRUCTED MIMIC DATA WITH LABEL MEAN {}/ SHAPE {}'.format(
+            self._labels.ravel().mean(), self._labels.shape))
 
 
 class ChestXR8Dataset(ChestDataset):
@@ -206,22 +390,27 @@ class ChestXR8Dataset(ChestDataset):
         label_path = csv_path + 'chestxray8_{}.csv'.format(mode)
         labels = pd.read_csv(label_path)
         if subset:
-            labels = labels[labels['Finding Labels'].str.contains('|'.join(diseases + ['No Finding']))]
+            labels = labels[labels['Finding Labels'].str.contains(
+                '|'.join(diseases + ['No Finding']))]
         if self._mode == 'train' and upsample:
             # labels_neg = labels[labels['Finding Labels'].str.contains('No Finding')]
             # labels_pos = labels[~labels['Finding Labels'].str.contains('No Finding')]
             # one vs all
-            labels_pos = labels[labels['Finding Labels'].str.contains(diseases[0])]
-            labels_neg = labels[~labels['Finding Labels'].str.contains(diseases[0])]
+            labels_pos = labels[labels['Finding Labels'].str.contains(
+                diseases[0])]
+            labels_neg = labels[~labels['Finding Labels'].str.contains(
+                diseases[0])]
             upweight_ratio = len(labels_neg)//len(labels_pos)
             if upweight_ratio > 0:
-                labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
+                labels_pos = labels_pos.loc[labels_pos.index.repeat(
+                    upweight_ratio)]
                 labels = pd.concat([labels_neg, labels_pos])
-        self._image_paths = [os.path.join(self._data_path, 'images', name) for name in labels['Image Index'].values]
+        self._image_paths = [os.path.join(
+            self._data_path, 'images', name) for name in labels['Image Index'].values]
         self._labels = get_labels(labels['Finding Labels'].values)
         self._num_image = len(self._image_paths)
         # assert len(
-            # self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
+        # self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class PadChestDataset(ChestDataset):
@@ -251,17 +440,21 @@ class PadChestDataset(ChestDataset):
             # labels_neg = labels[labels['Labels'].str.contains('normal')]
             # labels_pos = labels[~labels['Labels'].str.contains('normal')]
             # one vs all
-            labels_pos = labels[labels['Labels'].str.contains(diseases[0].lower())]
-            labels_neg = labels[~labels['Labels'].str.contains(diseases[0].lower())]
+            labels_pos = labels[labels['Labels'].str.contains(
+                diseases[0].lower())]
+            labels_neg = labels[~labels['Labels'].str.contains(
+                diseases[0].lower())]
             upweight_ratio = len(labels_neg)//len(labels_pos)
             if upweight_ratio > 0:
-                labels_pos = labels_pos.loc[labels_pos.index.repeat(upweight_ratio)]
+                labels_pos = labels_pos.loc[labels_pos.index.repeat(
+                    upweight_ratio)]
                 labels = pd.concat([labels_neg, labels_pos])
-        self._image_paths = [os.path.join(self._data_path, name) for name in labels['ImageID'].values]
+        self._image_paths = [os.path.join(
+            self._data_path, name) for name in labels['ImageID'].values]
         self._labels = get_labels(labels['Labels'].values)
         self._num_image = len(self._image_paths)
         # assert len(
-            # self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
+        # self._image_paths) == self._num_image, f"Paths and labels misaligned: {(len(self._image_paths), self._num_image)}"
 
 
 class chestXR(MultipleDomainDataset):
@@ -269,25 +462,31 @@ class chestXR(MultipleDomainDataset):
     N_STEPS = 100000  # Default, subclasses may override
     CHECKPOINT_FREQ = 5000  # Default, subclasses may override
     N_WORKERS = 8
+
     def __init__(self, root, test_envs, mode, hparams):
         super().__init__()
         # paths = ['/beegfs/wz727/mimic-cxr',
         #          '/scratch/wz727/chest_XR/chest_XR/data/CheXpert',
         #          '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
         #          '/scratch/lhz209/padchest']
-        paths = ['/scratch/wz727/chestXR/data/mimic-cxr', '', '/chestxray8', '/padchest']
+        paths = ['/scratch/wz727/chestXR/data/mimic-cxr',
+                 '', '/chestxray8', '/padchest']
         self.datasets = []
         for i, environment in enumerate(chestXR.ENVIRONMENTS):
             print(environment)
             path = os.path.join(root, environment)
             if environment == 'mimic-cxr':
-                env_dataset = MimicCXRDataset(paths[i] + '/train_sub.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
+                env_dataset = MimicCXRDataset(
+                    paths[i] + '/train_sub.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             elif environment == 'chexpert':
-                env_dataset = CheXpertDataset(paths[i] + '/CheXpert-v1.0/train_sub.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
+                env_dataset = CheXpertDataset(
+                    paths[i] + '/CheXpert-v1.0/train_sub.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             elif environment == 'chestxr8':
-                env_dataset = ChestXR8Dataset(paths[i] + '/Data_Entry_2017_v2020.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
+                env_dataset = ChestXR8Dataset(
+                    paths[i] + '/Data_Entry_2017_v2020.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             elif environment == 'padchest':
-                env_dataset = PadChestDataset(paths[i] + '/padchest_labels.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
+                env_dataset = PadChestDataset(
+                    paths[i] + '/padchest_labels.csv', mode=mode, upsample=hparams['upsample'], subset=hparams['subset'])
             else:
                 raise Exception('Unknown environments')
             if mode != 'train':
@@ -308,7 +507,6 @@ def get_dataset_class(dataset_name):
 
 def num_environments(dataset_name):
     return len(get_dataset_class(dataset_name).ENVIRONMENTS)
-
 
 
 class Debug(MultipleDomainDataset):
@@ -536,6 +734,3 @@ class Debug28(Debug):
 #                     '/scratch/wz727/chest_XR/chest_XR/data/chestxray8',
 #                     '/scratch/wz727/chest_XR/chest_XR/data/PadChest']
 #         super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
-
-
-
