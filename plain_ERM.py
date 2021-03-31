@@ -22,6 +22,7 @@ from torch.nn import functional as F
 
 
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 from domainbed import datasets
 # from domainbed import hparams_registry
@@ -39,7 +40,7 @@ hparams['d_steps_per_g_step'] = 1
 hparams['mlp_width'] = 512
 hparams['mlp_depth'] = 2
 hparams['pretrained'] = False
-hparams['subset'] = False
+hparams['subset'] = True
 hparams['upsample'] = False
 
 
@@ -63,7 +64,7 @@ test_dataset = val_joint_dataset.datasets[1]
 print('DONE GETTING DATA OF SHAPES = train {}, val 1 {}, val 2 {}, test{}'.format(
     len(train_dataset), len(val_dataset_1), len(val_dataset_2), len(test_dataset)))
 
-hparams['batch_size'] = 128
+hparams['batch_size'] = 24
 hparams['pin_memory'] = True
 hparams['weight_decay'] = 1e-6
 hparams['workers'] = 4
@@ -212,8 +213,9 @@ def cli_main():
     # ------------
     # training
     # ------------
+    model_save_callback = ModelCheckpoint(monitor="val_loss", dirpath="/scratch/lhz209/DomainBed/erm_baseline/", filename="ckpt-{epoch:02d}-{val_loss:.2f}", save_top_k=3, mode="min", period=1)
     trainer = pl.Trainer.from_argparse_args(
-        args, gpus=-1, logger=logger, limit_train_batches=0.1, limit_val_batches=0.1, precision=16, profiler="simple")
+        args, gpus=-1, logger=logger, limit_train_batches=1.0, limit_val_batches=1.0, precision=16, profiler="simple", callbacks=[model_save_callback])
     trainer.fit(model, train_loader, val_dataloaders=[
                 val_loader_1, val_loader_2])
 
